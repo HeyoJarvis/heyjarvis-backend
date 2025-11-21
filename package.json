@@ -1,0 +1,22 @@
+{
+  "name": "heyjarvis-backend",
+  "version": "1.0.0",
+  "description": "Backend API for HeyJarvis Electron app",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "heyjarvis",
+    "backend",
+    "api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@supabase/supabase-js": "^2.45.4",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5"
+  }
+}
