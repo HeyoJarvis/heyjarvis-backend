@@ -135,16 +135,18 @@ module.exports = async (req, res) => {
     }
 
     console.log('✅ Slack token exchange successful');
+    console.log('📦 Token response data:', JSON.stringify(tokenData, null, 2));
 
-    // Extract token information
-    const accessToken = tokenData.authed_user?.access_token;
+    // Extract token information - handle both user and bot tokens
+    const accessToken = tokenData.authed_user?.access_token || tokenData.access_token;
     const teamId = tokenData.team?.id;
     const teamName = tokenData.team?.name;
-    const slackUserId = tokenData.authed_user?.id;
-    const scopes = tokenData.authed_user?.scope?.split(',') || [];
+    const slackUserId = tokenData.authed_user?.id || tokenData.user_id;
+    const scopes = tokenData.authed_user?.scope?.split(',') || tokenData.scope?.split(',') || [];
 
     if (!accessToken) {
       console.error('❌ No access token in Slack response');
+      console.error('Full response:', JSON.stringify(tokenData, null, 2));
       throw new Error('No access token received from Slack');
     }
 
