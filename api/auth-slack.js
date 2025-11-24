@@ -46,18 +46,71 @@ module.exports = async (req, res) => {
     let userId = null;
     if (state) {
       try {
+        // Try to parse as base64url JSON first (new format)
         const stateData = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
         userId = stateData.user_id;
-        console.log('📝 Extracted user_id from state:', userId);
+        console.log('📝 Extracted user_id from base64url state:', userId);
       } catch (err) {
-        console.error('❌ Failed to parse state parameter:', err);
-        return res.status(400).send('Invalid state parameter');
+        // If that fails, try regular base64 (in case encoding differs)
+        try {
+          const stateData = JSON.parse(Buffer.from(state, 'base64').toString('utf-8'));
+          userId = stateData.user_id;
+          console.log('📝 Extracted user_id from base64 state:', userId);
+        } catch (err2) {
+          // If both fail, treat it as a plain UUID (legacy format from desktop app)
+          // Validate it looks like a UUID
+          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(state)) {
+            userId = state;
+            console.log('📝 Using state as plain user_id (legacy format):', userId);
+          } else {
+            console.error('❌ Invalid state parameter format:', state);
+            return res.status(400).send(`
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <title>Slack Authentication Failed</title>
+                <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
+                  .container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto; }
+                  h1 { color: #e01e5a; }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <h1>❌ Authentication Failed</h1>
+                  <p>Invalid state parameter format</p>
+                  <p>Please close this window and try again.</p>
+                </div>
+              </body>
+              </html>
+            `);
+          }
+        }
       }
     }
 
     if (!userId) {
       console.error('❌ No user_id found in state parameter');
-      return res.status(400).send('Missing user_id in state');
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Slack Authentication Failed</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
+            .container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto; }
+            h1 { color: #e01e5a; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>❌ Authentication Failed</h1>
+            <p>Missing user_id in state</p>
+            <p>Please close this window and try again.</p>
+          </div>
+        </body>
+        </html>
+      `);
     }
 
     // Exchange code for tokens
