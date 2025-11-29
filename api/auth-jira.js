@@ -90,15 +90,15 @@ module.exports = async (req, res) => {
       }
     });
 
-    const resource = resourcesResponse.data[0];
-    if (!resource) {
+    const resources = resourcesResponse.data;
+    if (!resources || resources.length === 0) {
       throw new Error('No accessible JIRA resources found');
     }
 
-    const cloudId = resource.id;
-    const siteUrl = resource.url;
-
-    console.log('✅ JIRA site info retrieved:', { cloudId, siteUrl });
+    console.log('✅ Found JIRA workspaces:', {
+      count: resources.length,
+      workspaces: resources.map(r => ({ id: r.id, name: r.name, url: r.url }))
+    });
 
     // Extract user_id and session_id from state
     let userId = null;
@@ -117,6 +117,19 @@ module.exports = async (req, res) => {
     if (!userId) {
       throw new Error('Missing user_id in OAuth state');
     }
+
+    // If multiple workspaces, show selector
+    if (resources.length > 1) {
+      console.log('🏢 Multiple workspaces detected, showing selector');
+      return res.send(generateWorkspaceSelectorHTML(resources, tokens, userId, req.headers.host));
+    }
+
+    // Single workspace - auto-select
+    const resource = resources[0];
+    const cloudId = resource.id;
+    const siteUrl = resource.url;
+
+    console.log('✅ Single workspace, auto-selecting:', { cloudId, siteUrl });
 
     // Save tokens directly to Supabase
     const { createClient } = require('@supabase/supabase-js');
@@ -274,4 +287,256 @@ module.exports = async (req, res) => {
   }
 };
 
+/**
+ * Generate HTML for workspace selector
+ * User clicks workspace → calls save endpoint → desktop app polling detects it
+ */
+function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host) {
+  const workspaceCards = workspaces.map(workspace => `
+    <div class="workspace-card" onclick="selectWorkspace('${workspace.id}', '${workspace.name.replace(/'/g, "\\'")}', '${workspace.url}')">
+      <div class="workspace-icon">
+        ${workspace.avatarUrl ? `<img src="${workspace.avatarUrl}" alt="${workspace.name}" />` : '🏢'}
+      </div>
+      <div class="workspace-info">
+        <h3>${workspace.name}</h3>
+        <p>${workspace.url}</p>
+      </div>
+    </div>
+  `).join('');
+
+  // Embed tokens and data as JSON for the save call
+  const saveData = JSON.stringify({
+    userId,
+    tokens: {
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expires_in: tokens.expires_in
+    },
+    workspaces: workspaces.map(w => ({
+      id: w.id,
+      name: w.name,
+      url: w.url,
+      avatarUrl: w.avatarUrl,
+      scopes: w.scopes
+    }))
+  });
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Select JIRA Workspace</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0052CC 0%, #0065FF 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+          }
+          
+          .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+          }
+          
+          h1 {
+            color: #172B4D;
+            margin-bottom: 10px;
+            font-size: 28px;
+            text-align: center;
+          }
+          
+          .subtitle {
+            color: #6B778C;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+          }
+          
+          .workspaces {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+          }
+          
+          .workspace-card {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            border: 2px solid #DFE1E6;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: white;
+          }
+          
+          .workspace-card:hover {
+            border-color: #0052CC;
+            background: #DEEBFF;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 82, 204, 0.15);
+          }
+          
+          .workspace-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            background: #F4F5F7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-right: 16px;
+            flex-shrink: 0;
+          }
+          
+          .workspace-icon img {
+            width: 100%;
+            height: 100%;
+            border-radius: 8px;
+            object-fit: cover;
+          }
+          
+          .workspace-info {
+            flex: 1;
+          }
+          
+          .workspace-info h3 {
+            color: #172B4D;
+            font-size: 16px;
+            margin-bottom: 4px;
+          }
+          
+          .workspace-info p {
+            color: #6B778C;
+            font-size: 13px;
+          }
+          
+          .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #0052CC;
+          }
+          
+          .loading.active {
+            display: block;
+          }
+          
+          .spinner {
+            border: 3px solid #F4F5F7;
+            border-top: 3px solid #0052CC;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+          }
+          
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+
+          .error {
+            display: none;
+            background: #FFEBE6;
+            color: #DE350B;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            text-align: center;
+          }
+
+          .error.active {
+            display: block;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>🏢 Select Your JIRA Workspace</h1>
+          <p class="subtitle">You have access to multiple workspaces. Please select the one you want to connect.</p>
+          
+          <div class="workspaces" id="workspaces">
+            ${workspaceCards}
+          </div>
+          
+          <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Connecting to workspace...</p>
+          </div>
+
+          <div class="error" id="error">
+            <strong>Connection failed.</strong> Please try again.
+          </div>
+        </div>
+        
+        <script>
+          const saveData = ${saveData};
+          
+          async function selectWorkspace(workspaceId, workspaceName, workspaceUrl) {
+            console.log('Selected workspace:', workspaceId, workspaceName, workspaceUrl);
+            
+            // Show loading
+            document.getElementById('workspaces').style.display = 'none';
+            document.getElementById('loading').classList.add('active');
+            document.getElementById('error').classList.remove('active');
+            
+            try {
+              // Call save endpoint
+              const response = await fetch('https://${host}/api/save-jira-workspace', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  ...saveData,
+                  selectedWorkspaceId: workspaceId
+                })
+              });
+              
+              const result = await response.json();
+              
+              if (result.success) {
+                // Show success
+                document.getElementById('loading').innerHTML = \`
+                  <div style="text-align: center;">
+                    <div style="font-size: 48px; margin-bottom: 10px;">✅</div>
+                    <h2 style="color: #0052CC; margin-bottom: 10px;">Connected!</h2>
+                    <p style="color: #6B778C; margin-bottom: 5px;">\${workspaceName}</p>
+                    <p style="color: #6B778C; font-size: 12px;">Return to HeyJarvis to continue</p>
+                  </div>
+                \`;
+                
+                // Auto-close after 2 seconds
+                setTimeout(() => {
+                  window.close();
+                }, 2000);
+              } else {
+                throw new Error(result.error || 'Failed to save workspace');
+              }
+            } catch (error) {
+              console.error('Error saving workspace:', error);
+              document.getElementById('loading').classList.remove('active');
+              document.getElementById('error').classList.add('active');
+              document.getElementById('workspaces').style.display = 'flex';
+            }
+          }
+        </script>
+      </body>
+    </html>
+  `;
+}
 
