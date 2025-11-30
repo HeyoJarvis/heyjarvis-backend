@@ -16,7 +16,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { messages, model = 'claude-3-haiku-20240307', max_tokens = 4096 } = req.body;
+    const { messages, model = 'claude-sonnet-4-20250514', max_tokens = 4096 } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Messages array is required' });
