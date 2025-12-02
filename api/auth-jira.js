@@ -125,9 +125,9 @@ module.exports = async (req, res) => {
     // Helper function to generate mobile/desktop success response
     const sendSuccessResponse = (siteName, siteUrl, redirectUrl) => {
       if (redirectUrl) {
-        // Mobile: redirect to app via deep link
+        // Mobile: show success with Done button (auto-redirect often doesn't work in mobile Safari)
         const callbackUrl = `${redirectUrl}?success=true&provider=jira&site=${encodeURIComponent(siteName || '')}`;
-        console.log('📱 Redirecting to mobile app:', callbackUrl);
+        console.log('📱 Mobile success page with redirect URL:', callbackUrl);
         return res.send(`
           <!DOCTYPE html>
           <html>
@@ -154,29 +154,25 @@ module.exports = async (req, res) => {
                 text-align: center;
                 box-shadow: 0 10px 40px rgba(0,0,0,0.2);
               }
-              .icon { font-size: 64px; margin-bottom: 20px; }
-              h1 { color: #22C55E; font-size: 24px; margin-bottom: 10px; }
-              .site { color: #64748B; font-size: 16px; margin-bottom: 30px; }
+              .icon { font-size: 72px; margin-bottom: 16px; }
+              h1 { color: #22C55E; font-size: 28px; margin-bottom: 8px; }
+              .site { color: #64748B; font-size: 16px; margin-bottom: 32px; }
               .btn {
-                display: inline-block;
+                display: block;
                 background: #0052CC;
                 color: white;
-                padding: 16px 32px;
-                border-radius: 12px;
+                padding: 18px 32px;
+                border-radius: 14px;
                 text-decoration: none;
                 font-weight: 600;
-                font-size: 16px;
+                font-size: 18px;
+                margin-bottom: 16px;
+                transition: transform 0.2s, box-shadow 0.2s;
               }
-              .hint { color: #94A3B8; font-size: 14px; margin-top: 20px; }
-              .spinner {
-                width: 24px; height: 24px;
-                border: 3px solid #E2E8F0;
-                border-top-color: #0052CC;
-                border-radius: 50%;
-                animation: spin 1s linear infinite;
-                margin: 0 auto 10px;
+              .btn:active {
+                transform: scale(0.98);
               }
-              @keyframes spin { to { transform: rotate(360deg); } }
+              .hint { color: #94A3B8; font-size: 13px; }
             </style>
           </head>
           <body>
@@ -184,25 +180,14 @@ module.exports = async (req, res) => {
               <div class="icon">✅</div>
               <h1>Connected!</h1>
               <p class="site">${siteName || siteUrl}</p>
-              <div id="auto-redirect">
-                <div class="spinner"></div>
-                <p class="hint">Returning to HeyJarvis...</p>
-              </div>
-              <div id="manual-redirect" style="display: none;">
-                <a href="${callbackUrl}" class="btn">Return to HeyJarvis</a>
-                <p class="hint">Tap the button if not redirected automatically</p>
-              </div>
+              <a href="${callbackUrl}" class="btn" id="doneBtn">Done</a>
+              <p class="hint">Tap Done to return to HeyJarvis</p>
             </div>
             <script>
-              // Auto redirect
+              // Try auto-redirect after short delay
               setTimeout(function() {
                 window.location.href = "${callbackUrl}";
-              }, 500);
-              // Show manual button after 2s if still here
-              setTimeout(function() {
-                document.getElementById('auto-redirect').style.display = 'none';
-                document.getElementById('manual-redirect').style.display = 'block';
-              }, 2000);
+              }, 300);
             </script>
           </body>
           </html>
@@ -614,38 +599,24 @@ function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host, mobileR
                 const mobileRedirectUrl = saveData.mobileRedirect;
                 
                 if (mobileRedirectUrl) {
-                  // Mobile: redirect to app
+                  // Mobile: show Done button
                   const callbackUrl = mobileRedirectUrl + '?success=true&provider=jira&site=' + encodeURIComponent(workspaceName);
                   console.log('📱 Mobile redirect to:', callbackUrl);
                   
                   document.getElementById('loading').innerHTML = \`
                     <div style="text-align: center;">
-                      <div style="font-size: 48px; margin-bottom: 10px;">✅</div>
-                      <h2 style="color: #0052CC; margin-bottom: 10px;">Connected!</h2>
-                      <p style="color: #6B778C; margin-bottom: 5px;">\${workspaceName}</p>
-                      <div id="auto-redir">
-                        <div class="spinner"></div>
-                        <p style="color: #6B778C; font-size: 12px;">Returning to HeyJarvis...</p>
-                      </div>
-                      <div id="manual-redir" style="display: none; margin-top: 20px;">
-                        <a href="\${callbackUrl}" style="background: #0052CC; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Return to HeyJarvis</a>
-                        <p style="color: #94A3B8; font-size: 12px; margin-top: 10px;">Tap button if not redirected</p>
-                      </div>
+                      <div style="font-size: 64px; margin-bottom: 16px;">✅</div>
+                      <h2 style="color: #22C55E; font-size: 24px; margin-bottom: 8px;">Connected!</h2>
+                      <p style="color: #6B778C; margin-bottom: 24px;">\${workspaceName}</p>
+                      <a href="\${callbackUrl}" style="display: block; background: #0052CC; color: white; padding: 18px 32px; border-radius: 14px; text-decoration: none; font-weight: 600; font-size: 18px; margin-bottom: 12px;">Done</a>
+                      <p style="color: #94A3B8; font-size: 13px;">Tap Done to return to HeyJarvis</p>
                     </div>
                   \`;
                   
-                  // Auto redirect
+                  // Try auto redirect
                   setTimeout(() => {
                     window.location.href = callbackUrl;
-                  }, 500);
-                  
-                  // Show manual button after 2s
-                  setTimeout(() => {
-                    const autoEl = document.getElementById('auto-redir');
-                    const manualEl = document.getElementById('manual-redir');
-                    if (autoEl) autoEl.style.display = 'none';
-                    if (manualEl) manualEl.style.display = 'block';
-                  }, 2000);
+                  }, 300);
                 } else {
                   // Desktop: show success and auto-close
                   document.getElementById('loading').innerHTML = \`
