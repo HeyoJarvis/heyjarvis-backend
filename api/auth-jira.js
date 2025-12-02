@@ -107,14 +107,40 @@ module.exports = async (req, res) => {
     let platform = null;
     if (state) {
       try {
-        const stateData = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
+        // Try URL-decoding first (Atlassian may URL-encode the state)
+        let decodedState = state;
+        try {
+          decodedState = decodeURIComponent(state);
+        } catch (e) {
+          // Already decoded or not URL-encoded
+        }
+        
+        console.log('📋 Raw state:', state.substring(0, 50) + '...');
+        console.log('📋 Decoded state:', decodedState.substring(0, 50) + '...');
+        
+        // Try base64url first, then regular base64
+        let stateData;
+        try {
+          stateData = JSON.parse(Buffer.from(decodedState, 'base64url').toString('utf-8'));
+        } catch (e) {
+          // Try with regular base64 (convert base64url to base64)
+          const base64 = decodedState.replace(/-/g, '+').replace(/_/g, '/');
+          stateData = JSON.parse(Buffer.from(base64, 'base64').toString('utf-8'));
+        }
+        
         userId = stateData.user_id;
         sessionId = stateData.session_id || 'default';
         mobileRedirect = stateData.mobile_redirect;
         platform = stateData.platform;
-        console.log('✅ Extracted from state:', { userId, sessionId, mobileRedirect: mobileRedirect ? 'SET' : 'NOT SET', platform });
+        console.log('✅ Extracted from state:', { 
+          userId, 
+          sessionId, 
+          mobileRedirect: mobileRedirect || 'NOT SET', 
+          platform: platform || 'NOT SET'
+        });
       } catch (err) {
         console.error('❌ Could not extract data from state:', err.message);
+        console.error('❌ State value:', state);
       }
     }
 
