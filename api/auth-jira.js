@@ -100,15 +100,19 @@ module.exports = async (req, res) => {
       workspaces: resources.map(r => ({ id: r.id, name: r.name, url: r.url }))
     });
 
-    // Extract user_id and session_id from state
+    // Extract user_id, session_id, and mobile_redirect from state
     let userId = null;
     let sessionId = 'default';
+    let mobileRedirect = null;
+    let platform = null;
     if (state) {
       try {
         const stateData = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
         userId = stateData.user_id;
         sessionId = stateData.session_id || 'default';
-        console.log('✅ Extracted from state:', { userId, sessionId });
+        mobileRedirect = stateData.mobile_redirect;
+        platform = stateData.platform;
+        console.log('✅ Extracted from state:', { userId, sessionId, mobileRedirect: mobileRedirect ? 'SET' : 'NOT SET', platform });
       } catch (err) {
         console.error('❌ Could not extract data from state:', err.message);
       }
@@ -117,11 +121,101 @@ module.exports = async (req, res) => {
     if (!userId) {
       throw new Error('Missing user_id in OAuth state');
     }
+    
+    // Helper function to generate mobile/desktop success response
+    const sendSuccessResponse = (siteName, siteUrl, redirectUrl) => {
+      if (redirectUrl) {
+        // Mobile: redirect to app via deep link
+        const callbackUrl = `${redirectUrl}?success=true&provider=jira&site=${encodeURIComponent(siteName || '')}`;
+        console.log('📱 Redirecting to mobile app:', callbackUrl);
+        return res.send(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>JIRA Connected</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #0052CC 0%, #2684FF 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+              }
+              .card {
+                background: white;
+                border-radius: 20px;
+                padding: 40px;
+                max-width: 400px;
+                text-align: center;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+              }
+              .icon { font-size: 64px; margin-bottom: 20px; }
+              h1 { color: #22C55E; font-size: 24px; margin-bottom: 10px; }
+              .site { color: #64748B; font-size: 16px; margin-bottom: 30px; }
+              .btn {
+                display: inline-block;
+                background: #0052CC;
+                color: white;
+                padding: 16px 32px;
+                border-radius: 12px;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 16px;
+              }
+              .hint { color: #94A3B8; font-size: 14px; margin-top: 20px; }
+              .spinner {
+                width: 24px; height: 24px;
+                border: 3px solid #E2E8F0;
+                border-top-color: #0052CC;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 10px;
+              }
+              @keyframes spin { to { transform: rotate(360deg); } }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="icon">✅</div>
+              <h1>Connected!</h1>
+              <p class="site">${siteName || siteUrl}</p>
+              <div id="auto-redirect">
+                <div class="spinner"></div>
+                <p class="hint">Returning to HeyJarvis...</p>
+              </div>
+              <div id="manual-redirect" style="display: none;">
+                <a href="${callbackUrl}" class="btn">Return to HeyJarvis</a>
+                <p class="hint">Tap the button if not redirected automatically</p>
+              </div>
+            </div>
+            <script>
+              // Auto redirect
+              setTimeout(function() {
+                window.location.href = "${callbackUrl}";
+              }, 500);
+              // Show manual button after 2s if still here
+              setTimeout(function() {
+                document.getElementById('auto-redirect').style.display = 'none';
+                document.getElementById('manual-redirect').style.display = 'block';
+              }, 2000);
+            </script>
+          </body>
+          </html>
+        `);
+      }
+      // Desktop: show close window message
+      return null; // Let the existing code handle desktop
+    };
 
     // If multiple workspaces, show selector
     if (resources.length > 1) {
       console.log('🏢 Multiple workspaces detected, showing selector');
-      return res.send(generateWorkspaceSelectorHTML(resources, tokens, userId, req.headers.host));
+      return res.send(generateWorkspaceSelectorHTML(resources, tokens, userId, req.headers.host, mobileRedirect));
     }
 
     // Single workspace - auto-select
@@ -176,7 +270,12 @@ module.exports = async (req, res) => {
 
     console.log('✅ JIRA tokens saved to Supabase successfully');
 
-    // Show success page
+    // Check if this is a mobile request - if so, redirect to app
+    if (mobileRedirect) {
+      return sendSuccessResponse(resource.name, siteUrl, mobileRedirect);
+    }
+
+    // Desktop: Show success page with auto-close
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -289,9 +388,9 @@ module.exports = async (req, res) => {
 
 /**
  * Generate HTML for workspace selector
- * User clicks workspace → calls save endpoint → desktop app polling detects it
+ * User clicks workspace → calls save endpoint → redirects to app (mobile) or closes (desktop)
  */
-function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host) {
+function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host, mobileRedirect = null) {
   const workspaceCards = workspaces.map(workspace => `
     <div class="workspace-card" onclick="selectWorkspace('${workspace.id}', '${workspace.name.replace(/'/g, "\\'")}', '${workspace.url}')">
       <div class="workspace-icon">
@@ -307,6 +406,7 @@ function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host) {
   // Embed tokens and data as JSON for the save call
   const saveData = JSON.stringify({
     userId,
+    mobileRedirect: mobileRedirect || null,
     tokens: {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
@@ -510,20 +610,58 @@ function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host) {
               const result = await response.json();
               
               if (result.success) {
-                // Show success
-                document.getElementById('loading').innerHTML = \`
-                  <div style="text-align: center;">
-                    <div style="font-size: 48px; margin-bottom: 10px;">✅</div>
-                    <h2 style="color: #0052CC; margin-bottom: 10px;">Connected!</h2>
-                    <p style="color: #6B778C; margin-bottom: 5px;">\${workspaceName}</p>
-                    <p style="color: #6B778C; font-size: 12px;">Return to HeyJarvis to continue</p>
-                  </div>
-                \`;
+                // Check if we have a mobile redirect
+                const mobileRedirectUrl = saveData.mobileRedirect;
                 
-                // Auto-close after 2 seconds
-                setTimeout(() => {
-                  window.close();
-                }, 2000);
+                if (mobileRedirectUrl) {
+                  // Mobile: redirect to app
+                  const callbackUrl = mobileRedirectUrl + '?success=true&provider=jira&site=' + encodeURIComponent(workspaceName);
+                  console.log('📱 Mobile redirect to:', callbackUrl);
+                  
+                  document.getElementById('loading').innerHTML = \`
+                    <div style="text-align: center;">
+                      <div style="font-size: 48px; margin-bottom: 10px;">✅</div>
+                      <h2 style="color: #0052CC; margin-bottom: 10px;">Connected!</h2>
+                      <p style="color: #6B778C; margin-bottom: 5px;">\${workspaceName}</p>
+                      <div id="auto-redir">
+                        <div class="spinner"></div>
+                        <p style="color: #6B778C; font-size: 12px;">Returning to HeyJarvis...</p>
+                      </div>
+                      <div id="manual-redir" style="display: none; margin-top: 20px;">
+                        <a href="\${callbackUrl}" style="background: #0052CC; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Return to HeyJarvis</a>
+                        <p style="color: #94A3B8; font-size: 12px; margin-top: 10px;">Tap button if not redirected</p>
+                      </div>
+                    </div>
+                  \`;
+                  
+                  // Auto redirect
+                  setTimeout(() => {
+                    window.location.href = callbackUrl;
+                  }, 500);
+                  
+                  // Show manual button after 2s
+                  setTimeout(() => {
+                    const autoEl = document.getElementById('auto-redir');
+                    const manualEl = document.getElementById('manual-redir');
+                    if (autoEl) autoEl.style.display = 'none';
+                    if (manualEl) manualEl.style.display = 'block';
+                  }, 2000);
+                } else {
+                  // Desktop: show success and auto-close
+                  document.getElementById('loading').innerHTML = \`
+                    <div style="text-align: center;">
+                      <div style="font-size: 48px; margin-bottom: 10px;">✅</div>
+                      <h2 style="color: #0052CC; margin-bottom: 10px;">Connected!</h2>
+                      <p style="color: #6B778C; margin-bottom: 5px;">\${workspaceName}</p>
+                      <p style="color: #6B778C; font-size: 12px;">Return to HeyJarvis to continue</p>
+                    </div>
+                  \`;
+                  
+                  // Auto-close after 2 seconds
+                  setTimeout(() => {
+                    window.close();
+                  }, 2000);
+                }
               } else {
                 throw new Error(result.error || 'Failed to save workspace');
               }
