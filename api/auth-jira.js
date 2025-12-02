@@ -148,79 +148,86 @@ module.exports = async (req, res) => {
       throw new Error('Missing user_id in OAuth state');
     }
     
-    // Helper function to generate mobile/desktop success response
+    // Helper function to generate success response
+    // Always shows Done button - works for both mobile and desktop
     const sendSuccessResponse = (siteName, siteUrl, redirectUrl) => {
-      if (redirectUrl) {
-        // Mobile: show success with Done button (auto-redirect often doesn't work in mobile Safari)
-        const callbackUrl = `${redirectUrl}?success=true&provider=jira&site=${encodeURIComponent(siteName || '')}`;
-        console.log('📱 Mobile success page with redirect URL:', callbackUrl);
-        return res.send(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>JIRA Connected</title>
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; }
-              body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: linear-gradient(135deg, #0052CC 0%, #2684FF 100%);
-                min-height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 20px;
-              }
-              .card {
-                background: white;
-                border-radius: 20px;
-                padding: 40px;
-                max-width: 400px;
-                text-align: center;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-              }
-              .icon { font-size: 72px; margin-bottom: 16px; }
-              h1 { color: #22C55E; font-size: 28px; margin-bottom: 8px; }
-              .site { color: #64748B; font-size: 16px; margin-bottom: 32px; }
-              .btn {
-                display: block;
-                background: #0052CC;
-                color: white;
-                padding: 18px 32px;
-                border-radius: 14px;
-                text-decoration: none;
-                font-weight: 600;
-                font-size: 18px;
-                margin-bottom: 16px;
-                transition: transform 0.2s, box-shadow 0.2s;
-              }
-              .btn:active {
-                transform: scale(0.98);
-              }
-              .hint { color: #94A3B8; font-size: 13px; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="icon">✅</div>
-              <h1>Connected!</h1>
-              <p class="site">${siteName || siteUrl}</p>
-              <a href="${callbackUrl}" class="btn" id="doneBtn">Done</a>
-              <p class="hint">Tap Done to return to HeyJarvis</p>
-            </div>
-            <script>
-              // Try auto-redirect after short delay
-              setTimeout(function() {
-                window.location.href = "${callbackUrl}";
-              }, 300);
-            </script>
-          </body>
-          </html>
-        `);
-      }
-      // Desktop: show close window message
-      return null; // Let the existing code handle desktop
+      // Use provided redirect URL, or fallback to heyjarvis:// deep link
+      const callbackUrl = redirectUrl 
+        ? `${redirectUrl}?success=true&provider=jira&site=${encodeURIComponent(siteName || '')}`
+        : `heyjarvis://auth/callback?success=true&provider=jira&site=${encodeURIComponent(siteName || '')}`;
+      
+      console.log('📱 Success page with callback URL:', callbackUrl);
+      console.log('📱 Redirect URL from state:', redirectUrl || 'NOT SET (using fallback)');
+      
+      // Detect if mobile via user agent
+      const userAgent = req.headers['user-agent'] || '';
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(userAgent);
+      console.log('📱 Is mobile device:', isMobile, '- UA:', userAgent.substring(0, 50));
+      
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>JIRA Connected</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background: linear-gradient(135deg, #0052CC 0%, #2684FF 100%);
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              padding: 20px;
+            }
+            .card {
+              background: white;
+              border-radius: 20px;
+              padding: 40px;
+              max-width: 400px;
+              text-align: center;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            }
+            .icon { font-size: 72px; margin-bottom: 16px; }
+            h1 { color: #22C55E; font-size: 28px; margin-bottom: 8px; }
+            .site { color: #64748B; font-size: 16px; margin-bottom: 32px; }
+            .btn {
+              display: block;
+              background: #0052CC;
+              color: white;
+              padding: 18px 32px;
+              border-radius: 14px;
+              text-decoration: none;
+              font-weight: 600;
+              font-size: 18px;
+              margin-bottom: 16px;
+              transition: transform 0.2s, box-shadow 0.2s;
+            }
+            .btn:active {
+              transform: scale(0.98);
+            }
+            .hint { color: #94A3B8; font-size: 13px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">✅</div>
+            <h1>Connected!</h1>
+            <p class="site">${siteName || siteUrl}</p>
+            <a href="${callbackUrl}" class="btn">Done</a>
+            <p class="hint">Tap Done to return to HeyJarvis</p>
+          </div>
+          <script>
+            // Try auto-redirect after short delay
+            setTimeout(function() {
+              window.location.href = "${callbackUrl}";
+            }, 500);
+          </script>
+        </body>
+        </html>
+      `);
     };
 
     // If multiple workspaces, show selector
@@ -281,11 +288,10 @@ module.exports = async (req, res) => {
 
     console.log('✅ JIRA tokens saved to Supabase successfully');
 
-    // Check if this is a mobile request - if so, redirect to app
-    if (mobileRedirect) {
-      return sendSuccessResponse(resource.name, siteUrl, mobileRedirect);
-    }
+    // Always show success page with Done button (works for mobile and desktop)
+    return sendSuccessResponse(resource.name, siteUrl, mobileRedirect);
 
+    /* Old desktop-only code - keeping for reference
     // Desktop: Show success page with auto-close
     res.send(`
       <!DOCTYPE html>
@@ -369,6 +375,7 @@ module.exports = async (req, res) => {
       </body>
       </html>
     `);
+    */
   } catch (error) {
     console.error('❌ JIRA OAuth error:', error.response?.data || error.message);
     res.status(500).send(`
@@ -621,44 +628,25 @@ function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host, mobileR
               const result = await response.json();
               
               if (result.success) {
-                // Check if we have a mobile redirect
-                const mobileRedirectUrl = saveData.mobileRedirect;
+                // Always show Done button - use mobile redirect if available, otherwise fallback
+                const mobileRedirectUrl = saveData.mobileRedirect || 'heyjarvis://auth/callback';
+                const callbackUrl = mobileRedirectUrl + '?success=true&provider=jira&site=' + encodeURIComponent(workspaceName);
+                console.log('📱 Callback URL:', callbackUrl);
                 
-                if (mobileRedirectUrl) {
-                  // Mobile: show Done button
-                  const callbackUrl = mobileRedirectUrl + '?success=true&provider=jira&site=' + encodeURIComponent(workspaceName);
-                  console.log('📱 Mobile redirect to:', callbackUrl);
-                  
-                  document.getElementById('loading').innerHTML = \`
-                    <div style="text-align: center;">
-                      <div style="font-size: 64px; margin-bottom: 16px;">✅</div>
-                      <h2 style="color: #22C55E; font-size: 24px; margin-bottom: 8px;">Connected!</h2>
-                      <p style="color: #6B778C; margin-bottom: 24px;">\${workspaceName}</p>
-                      <a href="\${callbackUrl}" style="display: block; background: #0052CC; color: white; padding: 18px 32px; border-radius: 14px; text-decoration: none; font-weight: 600; font-size: 18px; margin-bottom: 12px;">Done</a>
-                      <p style="color: #94A3B8; font-size: 13px;">Tap Done to return to HeyJarvis</p>
-                    </div>
-                  \`;
-                  
-                  // Try auto redirect
-                  setTimeout(() => {
-                    window.location.href = callbackUrl;
-                  }, 300);
-                } else {
-                  // Desktop: show success and auto-close
-                  document.getElementById('loading').innerHTML = \`
-                    <div style="text-align: center;">
-                      <div style="font-size: 48px; margin-bottom: 10px;">✅</div>
-                      <h2 style="color: #0052CC; margin-bottom: 10px;">Connected!</h2>
-                      <p style="color: #6B778C; margin-bottom: 5px;">\${workspaceName}</p>
-                      <p style="color: #6B778C; font-size: 12px;">Return to HeyJarvis to continue</p>
-                    </div>
-                  \`;
-                  
-                  // Auto-close after 2 seconds
-                  setTimeout(() => {
-                    window.close();
-                  }, 2000);
-                }
+                document.getElementById('loading').innerHTML = \`
+                  <div style="text-align: center;">
+                    <div style="font-size: 64px; margin-bottom: 16px;">✅</div>
+                    <h2 style="color: #22C55E; font-size: 24px; margin-bottom: 8px;">Connected!</h2>
+                    <p style="color: #6B778C; margin-bottom: 24px;">\${workspaceName}</p>
+                    <a href="\${callbackUrl}" style="display: block; background: #0052CC; color: white; padding: 18px 32px; border-radius: 14px; text-decoration: none; font-weight: 600; font-size: 18px; margin-bottom: 12px;">Done</a>
+                    <p style="color: #94A3B8; font-size: 13px;">Tap Done to return to HeyJarvis</p>
+                  </div>
+                \`;
+                
+                // Try auto redirect
+                setTimeout(() => {
+                  window.location.href = callbackUrl;
+                }, 500);
               } else {
                 throw new Error(result.error || 'Failed to save workspace');
               }
