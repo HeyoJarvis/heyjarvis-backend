@@ -90,21 +90,23 @@ module.exports = async (req, res) => {
 
     // Fetch issues from JIRA (with sprint info)
     // Note: Sprint is often in customfield_10020 (Scrum) or customfield_10021 (Kanban)
+    // Using new /search/jql endpoint (old /search was deprecated)
     const jql = 'ORDER BY updated DESC';
-    const fields = 'summary,status,priority,issuetype,assignee,duedate,labels,description,sprint,parent,project,updated,created,customfield_10020,customfield_10021';
+    const fields = ['summary', 'status', 'priority', 'issuetype', 'assignee', 'duedate', 'labels', 'description', 'sprint', 'parent', 'project', 'updated', 'created', 'customfield_10020', 'customfield_10021'];
     
-    console.log('Fetching JIRA issues...');
-    const issuesResponse = await axios.get(
-      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search`,
+    console.log('Fetching JIRA issues using new /search/jql endpoint...');
+    const issuesResponse = await axios.post(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql`,
+      {
+        jql: jql,
+        fields: fields,
+        maxResults: 100
+      },
       {
         headers: { 
           'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json'
-        },
-        params: {
-          jql,
-          fields,
-          maxResults: 100
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
         }
       }
     );
