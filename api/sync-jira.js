@@ -89,53 +89,35 @@ module.exports = async (req, res) => {
     }
 
     // Fetch issues from JIRA (with sprint info)
-    // Note: Sprint is often in customfield_10020 (Scrum) or customfield_10021 (Kanban)
-    // Using new /search/jql endpoint (old /search was deprecated)
+    // Using GET /rest/api/3/search/jql with query params (same as desktop app)
     const jql = 'ORDER BY updated DESC';
-    // Fields as comma-separated string (some JIRA versions prefer this format)
-    const fieldsStr = 'summary,status,priority,issuetype,assignee,duedate,labels,description,sprint,parent,project,updated,created,customfield_10020,customfield_10021';
+    const fields = [
+      'summary', 'status', 'priority', 'issuetype', 'assignee', 'duedate',
+      'labels', 'description', 'sprint', 'parent', 'project', 'updated', 'created',
+      // Sprint custom fields (varies by JIRA setup)
+      'customfield_10020', 'customfield_10010', 'customfield_10011',
+      // Story points custom fields
+      'customfield_10016', 'customfield_10026'
+    ];
     
-    console.log('Fetching JIRA issues using /search/jql endpoint...');
+    console.log('Fetching JIRA issues using GET /search/jql...');
     console.log('Cloud ID:', cloudId);
-    console.log('JQL:', jql);
     
-    let issuesResponse;
-    try {
-      // Try POST to /search/jql first (new endpoint)
-      issuesResponse = await axios.post(
-        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql`,
-        {
-          jql: jql,
-          fields: fieldsStr.split(','),
-          maxResults: 100
-        },
-        {
-          headers: { 
-            'Authorization': `Bearer ${accessToken}`,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-          }
+    // Build query params like desktop does
+    const params = new URLSearchParams();
+    params.append('jql', jql);
+    params.append('maxResults', '100');
+    fields.forEach(f => params.append('fields', f));
+    
+    const issuesResponse = await axios.get(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?${params.toString()}`,
+      {
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json'
         }
-      );
-    } catch (searchError) {
-      console.log('New /search/jql failed, trying legacy /search endpoint...', searchError.response?.data);
-      
-      // Fallback to GET /search (legacy endpoint, may still work for some instances)
-      issuesResponse = await axios.get(
-        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search`,
-        {
-          headers: { 
-            'Authorization': `Bearer ${accessToken}`,
-            'Accept': 'application/json'
-          },
-          params: {
-            jql: jql,
-            fields: fieldsStr,
-            maxResults: 100
-          }
-        }
-      );
-    }
+      }
+    );
 
     const issues = issuesResponse.data.issues || [];
     console.log(`Fetched ${issues.length} issues from JIRA`);
@@ -199,29 +181,36 @@ module.exports = async (req, res) => {
           }
         }
         
-        // Try customfield_10021 (alternative sprint field)
-        if (!sprintData && fields.customfield_10021) {
-          const sprintField = fields.customfield_10021;
-          if (Array.isArray(sprintField) && sprintField.length > 0) {
-            const activeSprint = sprintField.find(s => s.state === 'active') || sprintField[sprintField.length - 1];
-            if (activeSprint) {
-              sprintData = {
-                id: activeSprint.id,
-                name: activeSprint.name,
-                state: activeSprint.state
-              };
+        // Try customfield_10010 and customfield_10011 (other common sprint fields)
+        const sprintCandidates = [
+          fields.customfield_10010,
+          fields.customfield_10011
+        ];
+        
+        for (const candidate of sprintCandidates) {
+          if (sprintData) break;
+          if (!candidate) continue;
+          
+          if (Array.isArray(candidate) && candidate.length > 0) {
+            const activeSprint = candidate.find(s => s && s.state === 'active') || candidate[0];
+            if (activeSprint && activeSprint.name) {
+              sprintData = { id: activeSprint.id, name: activeSprint.name, state: activeSprint.state };
             }
-          } else if (typeof sprintField === 'object' && sprintField.name) {
-            sprintData = {
-              id: sprintField.id,
-              name: sprintField.name,
-              state: sprintField.state
-            };
+          } else if (typeof candidate === 'object' && candidate.name) {
+            sprintData = { id: candidate.id, name: candidate.name, state: candidate.state };
+          } else if (typeof candidate === 'string') {
+            const nameMatch = candidate.match(/name=([^,\]]+)/);
+            if (nameMatch) {
+              sprintData = { name: nameMatch[1] };
+            }
           }
         }
         
         if (sprintData) sprintsFound++;
-        console.log(`Issue ${issue.key}: sprint=${sprintData?.name || 'none'}`);  // Debug log
+        
+        // Extract just the sprint NAME (string) like desktop does
+        const sprintName = sprintData?.name || null;
+        console.log(`Issue ${issue.key}: sprint=${sprintName || 'none'}`);  // Debug log
 
         // Extract description as text
         let description = '';
@@ -263,7 +252,7 @@ module.exports = async (req, res) => {
             due_date: fields.duedate,
             labels: fields.labels || [],
             description: description,
-            sprint: sprintData,
+            sprint: sprintName,  // Store just the name like desktop does
             project_key: fields.project?.key,
             project_name: fields.project?.name,
             updated_at: fields.updated,
