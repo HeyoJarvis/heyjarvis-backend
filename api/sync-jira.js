@@ -89,8 +89,9 @@ module.exports = async (req, res) => {
     }
 
     // Fetch issues from JIRA (with sprint info)
+    // Note: Sprint is often in customfield_10020 (Scrum) or customfield_10021 (Kanban)
     const jql = 'ORDER BY updated DESC';
-    const fields = 'summary,status,priority,issuetype,assignee,duedate,labels,description,sprint,parent,project,updated,created';
+    const fields = 'summary,status,priority,issuetype,assignee,duedate,labels,description,sprint,parent,project,updated,created,customfield_10020,customfield_10021';
     
     console.log('Fetching JIRA issues...');
     const issuesResponse = await axios.get(
@@ -119,26 +120,68 @@ module.exports = async (req, res) => {
       try {
         const fields = issue.fields;
         
-        // Extract sprint info (can be array or null)
+        // Extract sprint info (can be in different fields depending on JIRA config)
         let sprintData = null;
-        if (fields.sprint) {
-          // Sprint is a single sprint object
+        
+        // Try direct sprint field first
+        if (fields.sprint && typeof fields.sprint === 'object') {
           sprintData = {
             id: fields.sprint.id,
             name: fields.sprint.name,
             state: fields.sprint.state
           };
-        } else if (fields.customfield_10020 && Array.isArray(fields.customfield_10020)) {
-          // Some JIRA instances use custom field for sprint
-          const activeSprint = fields.customfield_10020.find(s => s.state === 'active') || fields.customfield_10020[0];
-          if (activeSprint) {
+        }
+        
+        // Try customfield_10020 (most common for Scrum boards)
+        if (!sprintData && fields.customfield_10020) {
+          const sprintField = fields.customfield_10020;
+          if (Array.isArray(sprintField) && sprintField.length > 0) {
+            // Get active sprint or most recent
+            const activeSprint = sprintField.find(s => s.state === 'active') || sprintField[sprintField.length - 1];
+            if (activeSprint) {
+              sprintData = {
+                id: activeSprint.id,
+                name: activeSprint.name,
+                state: activeSprint.state
+              };
+            }
+          } else if (typeof sprintField === 'object' && sprintField.name) {
             sprintData = {
-              id: activeSprint.id,
-              name: activeSprint.name,
-              state: activeSprint.state
+              id: sprintField.id,
+              name: sprintField.name,
+              state: sprintField.state
+            };
+          } else if (typeof sprintField === 'string') {
+            // Some JIRA returns sprint as a string like "com.atlassian.greenhopper.service.sprint.Sprint@..."
+            const nameMatch = sprintField.match(/name=([^,\]]+)/);
+            if (nameMatch) {
+              sprintData = { name: nameMatch[1] };
+            }
+          }
+        }
+        
+        // Try customfield_10021 (alternative sprint field)
+        if (!sprintData && fields.customfield_10021) {
+          const sprintField = fields.customfield_10021;
+          if (Array.isArray(sprintField) && sprintField.length > 0) {
+            const activeSprint = sprintField.find(s => s.state === 'active') || sprintField[sprintField.length - 1];
+            if (activeSprint) {
+              sprintData = {
+                id: activeSprint.id,
+                name: activeSprint.name,
+                state: activeSprint.state
+              };
+            }
+          } else if (typeof sprintField === 'object' && sprintField.name) {
+            sprintData = {
+              id: sprintField.id,
+              name: sprintField.name,
+              state: sprintField.state
             };
           }
         }
+        
+        console.log(`Issue ${issue.key}: sprint=${sprintData?.name || 'none'}`);  // Debug log
 
         // Extract description as text
         let description = '';
