@@ -253,7 +253,8 @@ module.exports = async (req, res) => {
             due_date: fields.duedate,
             labels: fields.labels || [],
             description: description,
-            sprint: sprintName,  // Store just the name like desktop does
+            sprint: sprintName,  // For compatibility with web
+            sprint_name: sprintName,  // For compatibility with desktop
             project_key: fields.project?.key,
             project_name: fields.project?.name,
             updated_at: fields.updated,
