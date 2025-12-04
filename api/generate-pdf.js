@@ -3,17 +3,17 @@
  * Uses html-pdf-node for serverless-compatible PDF generation
  */
 
-const { createClient } = require('@supabase/supabase-js');
-
 module.exports = async (req, res) => {
-  // Enable CORS
+  // Enable CORS - set headers first
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
   res.setHeader('Access-Control-Max-Age', '86400');
 
+  // Handle preflight OPTIONS request immediately
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200);
+    return res.end();
   }
 
   if (req.method !== 'POST') {
