@@ -92,31 +92,67 @@ module.exports = async (req, res) => {
     // Note: Sprint is often in customfield_10020 (Scrum) or customfield_10021 (Kanban)
     // Using new /search/jql endpoint (old /search was deprecated)
     const jql = 'ORDER BY updated DESC';
-    const fields = ['summary', 'status', 'priority', 'issuetype', 'assignee', 'duedate', 'labels', 'description', 'sprint', 'parent', 'project', 'updated', 'created', 'customfield_10020', 'customfield_10021'];
+    // Fields as comma-separated string (some JIRA versions prefer this format)
+    const fieldsStr = 'summary,status,priority,issuetype,assignee,duedate,labels,description,sprint,parent,project,updated,created,customfield_10020,customfield_10021';
     
-    console.log('Fetching JIRA issues using new /search/jql endpoint...');
-    const issuesResponse = await axios.post(
-      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql`,
-      {
-        jql: jql,
-        fields: fields,
-        maxResults: 100
-      },
-      {
-        headers: { 
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
+    console.log('Fetching JIRA issues using /search/jql endpoint...');
+    console.log('Cloud ID:', cloudId);
+    console.log('JQL:', jql);
+    
+    let issuesResponse;
+    try {
+      // Try POST to /search/jql first (new endpoint)
+      issuesResponse = await axios.post(
+        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql`,
+        {
+          jql: jql,
+          fields: fieldsStr.split(','),
+          maxResults: 100
+        },
+        {
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
         }
-      }
-    );
+      );
+    } catch (searchError) {
+      console.log('New /search/jql failed, trying legacy /search endpoint...', searchError.response?.data);
+      
+      // Fallback to GET /search (legacy endpoint, may still work for some instances)
+      issuesResponse = await axios.get(
+        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search`,
+        {
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+          },
+          params: {
+            jql: jql,
+            fields: fieldsStr,
+            maxResults: 100
+          }
+        }
+      );
+    }
 
     const issues = issuesResponse.data.issues || [];
     console.log(`Fetched ${issues.length} issues from JIRA`);
+    
+    // Log first issue to see available fields (for debugging)
+    if (issues.length > 0) {
+      const sampleFields = issues[0].fields;
+      console.log('Sample issue fields available:', Object.keys(sampleFields));
+      console.log('Sprint field:', sampleFields.sprint);
+      console.log('customfield_10020:', sampleFields.customfield_10020);
+      console.log('customfield_10021:', sampleFields.customfield_10021);
+    }
 
     // Process and store each issue
     let synced = 0;
     let errors = 0;
+    let sprintsFound = 0;
 
     for (const issue of issues) {
       try {
@@ -132,6 +168,7 @@ module.exports = async (req, res) => {
             name: fields.sprint.name,
             state: fields.sprint.state
           };
+          console.log(`Issue ${issue.key}: Found sprint in fields.sprint: ${sprintData.name}`);
         }
         
         // Try customfield_10020 (most common for Scrum boards)
@@ -183,6 +220,7 @@ module.exports = async (req, res) => {
           }
         }
         
+        if (sprintData) sprintsFound++;
         console.log(`Issue ${issue.key}: sprint=${sprintData?.name || 'none'}`);  // Debug log
 
         // Extract description as text
@@ -254,13 +292,14 @@ module.exports = async (req, res) => {
       }
     }
 
-    console.log(`Sync complete: ${synced} synced, ${errors} errors`);
+    console.log(`Sync complete: ${synced} synced, ${errors} errors, ${sprintsFound} with sprint data`);
 
     return res.status(200).json({
       success: true,
       synced,
       errors,
-      total: issues.length
+      total: issues.length,
+      sprintsFound
     });
 
   } catch (error) {
