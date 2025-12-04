@@ -35,10 +35,25 @@ module.exports = async (req, res) => {
     
     // Save to Supabase
     const { createClient } = require('@supabase/supabase-js');
+    
+    // Check if Supabase credentials are set
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('❌ Missing Supabase credentials!', {
+        hasUrl: !!process.env.SUPABASE_URL,
+        hasKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+      });
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: Missing Supabase credentials'
+      });
+    }
+    
     const supabase = createClient(
       process.env.SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
+    
+    console.log('📊 Querying Supabase for user:', userId);
     
     // Get current integration settings
     const { data: userData, error: fetchError } = await supabase
@@ -48,10 +63,26 @@ module.exports = async (req, res) => {
       .single();
     
     if (fetchError) {
-      console.error('❌ Failed to fetch user:', fetchError);
+      console.error('❌ Failed to fetch user:', {
+        error: fetchError,
+        code: fetchError.code,
+        message: fetchError.message,
+        details: fetchError.details,
+        hint: fetchError.hint,
+        userId: userId
+      });
+      
+      // Check if user doesn't exist
+      if (fetchError.code === 'PGRST116') {
+        return res.status(404).json({
+          success: false,
+          error: `User not found in database: ${userId}`
+        });
+      }
+      
       return res.status(500).json({
         success: false,
-        error: 'Failed to fetch user data'
+        error: `Failed to fetch user data: ${fetchError.message}`
       });
     }
     
