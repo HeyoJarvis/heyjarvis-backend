@@ -76,18 +76,43 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Process messages to extract user info
+    // Collect unique user IDs to fetch their info
+    const userIds = [...new Set(response.data.messages.map(msg => msg.user).filter(Boolean))];
+    const userMap = {};
+
+    // Fetch user info for each unique user
+    for (const userId of userIds) {
+      try {
+        const userResponse = await axios.get('https://slack.com/api/users.info', {
+          params: { user: userId },
+          headers: {
+            'Authorization': `Bearer ${slackSettings.access_token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (userResponse.data.ok && userResponse.data.user) {
+          const u = userResponse.data.user;
+          userMap[userId] = u.profile?.display_name || u.real_name || u.name || userId;
+        }
+      } catch (e) {
+        console.log(`Failed to fetch user info for ${userId}`);
+        userMap[userId] = userId;
+      }
+    }
+
+    // Process messages with resolved user names
     const messages = (response.data.messages || []).map(msg => ({
       user: msg.user,
       text: msg.text,
       timestamp: msg.ts ? new Date(parseFloat(msg.ts) * 1000).toISOString() : null,
       subtype: msg.subtype,
-      user_display_name: msg.user_profile?.display_name,
-      user_real_name: msg.user_profile?.real_name,
-      user_name: msg.username
+      user_display_name: userMap[msg.user] || msg.user,
+      user_real_name: userMap[msg.user],
+      user_name: userMap[msg.user]
     }));
 
-    console.log(`✅ Found ${messages.length} messages`);
+    console.log(`✅ Found ${messages.length} messages with ${Object.keys(userMap).length} users resolved`);
 
     return res.json({ 
       success: true, 
