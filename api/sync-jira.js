@@ -90,7 +90,8 @@ module.exports = async (req, res) => {
 
     // Fetch issues from JIRA (with sprint info)
     // Using GET /rest/api/3/search/jql with query params (same as desktop app)
-    const jql = 'ORDER BY updated DESC';
+    // Note: JIRA requires bounded queries - use updated filter to get recent issues
+    const jql = 'updated >= -365d ORDER BY updated DESC';  // Get issues updated in last year
     const fields = [
       'summary', 'status', 'priority', 'issuetype', 'assignee', 'duedate',
       'labels', 'description', 'sprint', 'parent', 'project', 'updated', 'created',
