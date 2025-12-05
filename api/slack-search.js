@@ -50,14 +50,25 @@ module.exports = async (req, res) => {
 
     const slackSettings = userData?.integration_settings?.slack;
     
-    if (!slackSettings?.access_token) {
+    if (!slackSettings?.access_token && !slackSettings?.user_access_token) {
       return res.status(400).json({ success: false, error: 'Slack not connected', messages: [] });
     }
 
+    // IMPORTANT: search.messages requires USER token (xoxp-*), not bot token (xoxb-*)
+    // Use user_access_token if available, otherwise fall back to access_token
+    const searchToken = slackSettings.user_access_token || slackSettings.access_token;
+    
+    // Check if we have a user token (starts with xoxp-)
+    if (searchToken && !searchToken.startsWith('xoxp-')) {
+      console.log('⚠️ Warning: Search token may be a bot token. search:read requires a user token.');
+      console.log('Token type:', searchToken.substring(0, 5));
+    }
+
     console.log('✅ Found Slack token, searching messages...');
+    console.log('🔑 Token type:', searchToken?.substring(0, 5) || 'none');
 
     // Search messages using Slack API
-    // Note: This requires the 'search:read' scope
+    // Note: This requires the 'search:read' USER scope
     const response = await axios.get('https://slack.com/api/search.messages', {
       params: {
         query: query,
@@ -66,7 +77,7 @@ module.exports = async (req, res) => {
         sort_dir: 'desc'
       },
       headers: {
-        'Authorization': `Bearer ${slackSettings.access_token}`,
+        'Authorization': `Bearer ${searchToken}`,
         'Content-Type': 'application/json'
       }
     });

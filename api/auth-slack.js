@@ -137,12 +137,20 @@ module.exports = async (req, res) => {
     console.log('✅ Slack token exchange successful');
     console.log('📦 Token response data:', JSON.stringify(tokenData, null, 2));
 
-    // Extract token information - handle both user and bot tokens
-    const accessToken = tokenData.authed_user?.access_token || tokenData.access_token;
+    // Extract token information - save BOTH user and bot tokens
+    // User token (xoxp-*) is needed for search:read scope
+    // Bot token (xoxb-*) is used for channel access and messaging
+    const userAccessToken = tokenData.authed_user?.access_token;
+    const botAccessToken = tokenData.access_token;
+    // Prefer user token for general access, fall back to bot token
+    const accessToken = userAccessToken || botAccessToken;
+    
     const teamId = tokenData.team?.id;
     const teamName = tokenData.team?.name;
     const slackUserId = tokenData.authed_user?.id || tokenData.user_id;
-    const scopes = tokenData.authed_user?.scope?.split(',') || tokenData.scope?.split(',') || [];
+    const userScopes = tokenData.authed_user?.scope?.split(',') || [];
+    const botScopes = tokenData.scope?.split(',') || [];
+    const scopes = [...new Set([...userScopes, ...botScopes])];
 
     if (!accessToken) {
       console.error('❌ No access token in Slack response');
@@ -184,6 +192,9 @@ module.exports = async (req, res) => {
     integrationSettings.slack = {
       authenticated: true,
       access_token: accessToken,
+      // Store both tokens for different use cases
+      user_access_token: userAccessToken,  // For search:read (xoxp-*)
+      bot_access_token: botAccessToken,    // For channels/messaging (xoxb-*)
       team_id: teamId,
       team_name: teamName,
       slack_user_id: slackUserId,
@@ -191,6 +202,8 @@ module.exports = async (req, res) => {
       email: email,
       avatar: avatar,
       scopes: scopes,
+      user_scopes: userScopes,
+      bot_scopes: botScopes,
       connected_at: new Date().toISOString()
     };
 
