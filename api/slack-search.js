@@ -64,8 +64,13 @@ module.exports = async (req, res) => {
       console.log('Token type:', searchToken.substring(0, 5));
     }
 
-    console.log('✅ Found Slack token, searching messages...');
-    console.log('🔑 Token type:', searchToken?.substring(0, 5) || 'none');
+    console.log('✅ Found Slack tokens:');
+    console.log('   - user_access_token:', slackSettings.user_access_token ? `${slackSettings.user_access_token.substring(0, 10)}...` : 'NOT SET');
+    console.log('   - bot_access_token:', slackSettings.bot_access_token ? `${slackSettings.bot_access_token.substring(0, 10)}...` : 'NOT SET');
+    console.log('   - access_token:', slackSettings.access_token ? `${slackSettings.access_token.substring(0, 10)}...` : 'NOT SET');
+    console.log('🔑 Using token for search:', searchToken?.substring(0, 10) || 'none');
+    console.log('📋 User scopes:', slackSettings.user_scopes || 'NOT SET');
+    console.log('📋 Bot scopes:', slackSettings.bot_scopes || 'NOT SET');
 
     // Search messages using Slack API
     // Note: This requires the 'search:read' USER scope

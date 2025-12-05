@@ -135,7 +135,11 @@ module.exports = async (req, res) => {
     }
 
     console.log('✅ Slack token exchange successful');
-    console.log('📦 Token response data:', JSON.stringify(tokenData, null, 2));
+    console.log('📦 Token response summary:');
+    console.log('   - authed_user.access_token:', tokenData.authed_user?.access_token ? `${tokenData.authed_user.access_token.substring(0, 10)}... (USER TOKEN)` : 'NOT PROVIDED');
+    console.log('   - access_token:', tokenData.access_token ? `${tokenData.access_token.substring(0, 10)}... (BOT TOKEN)` : 'NOT PROVIDED');
+    console.log('   - authed_user.scope:', tokenData.authed_user?.scope || 'NOT PROVIDED');
+    console.log('   - scope:', tokenData.scope || 'NOT PROVIDED');
 
     // Extract token information - save BOTH user and bot tokens
     // User token (xoxp-*) is needed for search:read scope
@@ -218,7 +222,11 @@ module.exports = async (req, res) => {
       throw updateError;
     }
 
-    console.log('✅ Slack tokens saved successfully to Supabase.');
+    console.log('✅ Slack tokens saved successfully to Supabase:');
+    console.log('   - user_access_token:', userAccessToken ? `${userAccessToken.substring(0, 10)}...` : 'NOT SET');
+    console.log('   - bot_access_token:', botAccessToken ? `${botAccessToken.substring(0, 10)}...` : 'NOT SET');
+    console.log('   - user_scopes:', userScopes.join(', ') || 'NONE');
+    console.log('   - bot_scopes:', botScopes.join(', ') || 'NONE');
 
     // Return success page
     return res.status(200).send(`
