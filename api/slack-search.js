@@ -28,7 +28,12 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log('🔍 Searching Slack for:', query);
+    console.log('========================================');
+    console.log('🔍 SLACK SEARCH REQUEST');
+    console.log('   Query:', query);
+    console.log('   User ID:', userId);
+    console.log('   Query length:', query?.length);
+    console.log('========================================');
 
     // Initialize Supabase
     const supabase = createClient(
@@ -109,7 +114,15 @@ module.exports = async (req, res) => {
     // Process search results
     const matches = response.data.messages?.matches || [];
     
-    console.log(`✅ Found ${matches.length} matching messages`);
+    console.log('========================================');
+    console.log('📊 SLACK SEARCH RESULTS');
+    console.log(`   Total matches: ${response.data.messages?.total || 0}`);
+    console.log(`   Returned matches: ${matches.length}`);
+    if (matches.length > 0) {
+      console.log('   First match preview:', matches[0]?.text?.substring(0, 100));
+      console.log('   First match channel:', matches[0]?.channel?.name);
+    }
+    console.log('========================================');
 
     // Format messages for the frontend
     const messages = matches.map(match => ({
