@@ -38,7 +38,6 @@ module.exports = async (req, res) => {
       return res.status(400).send('Missing authorization code');
     }
 
-    console.log('🔐 JIRA OAuth callback received, exchanging code for tokens...');
 
     // Get the redirect URI - use the actual host from the request
     const redirectUri = `https://${req.headers.host}/api/auth-jira`;
@@ -49,7 +48,6 @@ module.exports = async (req, res) => {
       try {
         const stateData = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
         codeVerifier = stateData.code_verifier;
-        console.log('✅ Extracted code_verifier from state');
       } catch (err) {
         console.error('❌ Failed to parse state:', err.message);
       }
@@ -59,11 +57,6 @@ module.exports = async (req, res) => {
       throw new Error('Missing code_verifier in state parameter. PKCE is required for JIRA OAuth.');
     }
     
-    console.log('Token exchange params:', {
-      redirectUri,
-      hasCode: !!code,
-      hasCodeVerifier: !!codeVerifier
-    });
 
     // Exchange code for tokens (with PKCE)
     const tokenResponse = await axios.post('https://auth.atlassian.com/oauth/token', {
@@ -80,7 +73,6 @@ module.exports = async (req, res) => {
     });
 
     const tokens = tokenResponse.data;
-    console.log('✅ Tokens received from Atlassian');
 
     // Get accessible resources (cloud IDs)
     const resourcesResponse = await axios.get('https://api.atlassian.com/oauth/token/accessible-resources', {
@@ -95,10 +87,6 @@ module.exports = async (req, res) => {
       throw new Error('No accessible JIRA resources found');
     }
 
-    console.log('✅ Found JIRA workspaces:', {
-      count: resources.length,
-      workspaces: resources.map(r => ({ id: r.id, name: r.name, url: r.url }))
-    });
 
     // Extract user_id, session_id, and mobile_redirect from state
     let userId = null;
@@ -115,8 +103,6 @@ module.exports = async (req, res) => {
           // Already decoded or not URL-encoded
         }
         
-        console.log('📋 Raw state:', state.substring(0, 50) + '...');
-        console.log('📋 Decoded state:', decodedState.substring(0, 50) + '...');
         
         // Try base64url first, then regular base64
         let stateData;
@@ -132,12 +118,6 @@ module.exports = async (req, res) => {
         sessionId = stateData.session_id || 'default';
         mobileRedirect = stateData.mobile_redirect;
         platform = stateData.platform;
-        console.log('✅ Extracted from state:', { 
-          userId, 
-          sessionId, 
-          mobileRedirect: mobileRedirect || 'NOT SET', 
-          platform: platform || 'NOT SET'
-        });
       } catch (err) {
         console.error('❌ Could not extract data from state:', err.message);
         console.error('❌ State value:', state);
@@ -156,13 +136,10 @@ module.exports = async (req, res) => {
         ? `${redirectUrl}?success=true&provider=jira&site=${encodeURIComponent(siteName || '')}`
         : `heyjarvis://auth/callback?success=true&provider=jira&site=${encodeURIComponent(siteName || '')}`;
       
-      console.log('📱 Success page with callback URL:', callbackUrl);
-      console.log('📱 Redirect URL from state:', redirectUrl || 'NOT SET (using fallback)');
       
       // Detect if mobile via user agent
       const userAgent = req.headers['user-agent'] || '';
       const isMobile = /iPhone|iPad|iPod|Android/i.test(userAgent);
-      console.log('📱 Is mobile device:', isMobile, '- UA:', userAgent.substring(0, 50));
       
       return res.send(`
         <!DOCTYPE html>
@@ -232,7 +209,6 @@ module.exports = async (req, res) => {
 
     // If multiple workspaces, show selector
     if (resources.length > 1) {
-      console.log('🏢 Multiple workspaces detected, showing selector');
       return res.send(generateWorkspaceSelectorHTML(resources, tokens, userId, req.headers.host, mobileRedirect));
     }
 
@@ -241,7 +217,6 @@ module.exports = async (req, res) => {
     const cloudId = resource.id;
     const siteUrl = resource.url;
 
-    console.log('✅ Single workspace, auto-selecting:', { cloudId, siteUrl });
 
     // Save tokens directly to Supabase
     const { createClient } = require('@supabase/supabase-js');
@@ -250,7 +225,6 @@ module.exports = async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    console.log('💾 Saving JIRA tokens to Supabase for user:', userId);
 
     // Get current integration settings
     const { data: userData, error: fetchError } = await supabase
@@ -271,6 +245,7 @@ module.exports = async (req, res) => {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_expiry: new Date(Date.now() + (tokens.expires_in * 1000)).toISOString(),
+      scope: tokens.scope, // Save granted scopes (includes Confluence permissions)
       cloud_id: cloudId,
       site_url: siteUrl,
       connected_at: new Date().toISOString()
@@ -286,7 +261,6 @@ module.exports = async (req, res) => {
       throw new Error('Failed to save JIRA tokens');
     }
 
-    console.log('✅ JIRA tokens saved to Supabase successfully');
 
     // Always show success page with Done button (works for mobile and desktop)
     return sendSuccessResponse(resource.name, siteUrl, mobileRedirect);
@@ -605,7 +579,6 @@ function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host, mobileR
           const saveData = ${saveData};
           
           async function selectWorkspace(workspaceId, workspaceName, workspaceUrl) {
-            console.log('Selected workspace:', workspaceId, workspaceName, workspaceUrl);
             
             // Show loading
             document.getElementById('workspaces').style.display = 'none';
@@ -631,7 +604,6 @@ function generateWorkspaceSelectorHTML(workspaces, tokens, userId, host, mobileR
                 // Always show Done button - use mobile redirect if available, otherwise fallback
                 const mobileRedirectUrl = saveData.mobileRedirect || 'heyjarvis://auth/callback';
                 const callbackUrl = mobileRedirectUrl + '?success=true&provider=jira&site=' + encodeURIComponent(workspaceName);
-                console.log('📱 Callback URL:', callbackUrl);
                 
                 document.getElementById('loading').innerHTML = \`
                   <div style="text-align: center;">

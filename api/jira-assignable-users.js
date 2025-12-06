@@ -56,7 +56,6 @@ module.exports = async (req, res) => {
     // Check if token is expired and refresh if needed (same as sync-jira.js)
     const tokenExpiry = jiraSettings.token_expiry ? new Date(jiraSettings.token_expiry) : null;
     if (tokenExpiry && tokenExpiry < new Date() && refreshToken) {
-      console.log('JIRA token expired, refreshing...');
       try {
         const refreshResponse = await axios.post('https://auth.atlassian.com/oauth/token', {
           grant_type: 'refresh_token',
@@ -80,14 +79,12 @@ module.exports = async (req, res) => {
           .update({ integration_settings: integrationSettings })
           .eq('id', userId);
 
-        console.log('JIRA token refreshed successfully');
       } catch (refreshError) {
         console.error('Failed to refresh JIRA token:', refreshError.response?.data || refreshError.message);
         return res.status(200).json({ success: false, users: [], error: 'Token refresh failed. Please reconnect JIRA.' });
       }
     }
 
-    console.log('Fetching assignable users for project:', projectKey);
 
     // Get assignable users for the project
     const response = await axios.get(
@@ -107,7 +104,6 @@ module.exports = async (req, res) => {
       avatarUrl: u.avatarUrls?.['48x48']
     }));
 
-    console.log(`Found ${users.length} assignable users for project ${projectKey}`);
     return res.status(200).json({ success: true, users });
 
   } catch (error) {

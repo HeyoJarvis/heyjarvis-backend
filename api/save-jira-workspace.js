@@ -8,7 +8,6 @@ module.exports = async (req, res) => {
   try {
     const { userId, tokens, workspaces, selectedWorkspaceId } = req.body;
     
-    console.log('💾 Saving selected JIRA workspace:', { userId, selectedWorkspaceId });
     
     if (!userId || !tokens || !workspaces || !selectedWorkspaceId) {
       return res.status(400).json({
@@ -27,11 +26,6 @@ module.exports = async (req, res) => {
       });
     }
     
-    console.log('✅ Workspace found:', {
-      id: selectedWorkspace.id,
-      name: selectedWorkspace.name,
-      url: selectedWorkspace.url
-    });
     
     // Save to Supabase
     const { createClient } = require('@supabase/supabase-js');
@@ -53,7 +47,6 @@ module.exports = async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
     
-    console.log('📊 Querying Supabase for user:', userId);
     
     // Get current integration settings
     const { data: userData, error: fetchError } = await supabase
@@ -112,11 +105,6 @@ module.exports = async (req, res) => {
       });
     }
     
-    console.log('✅ JIRA workspace saved successfully:', {
-      userId,
-      workspace: selectedWorkspace.name,
-      url: selectedWorkspace.url
-    });
     
     // Return success
     res.json({

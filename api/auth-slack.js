@@ -37,7 +37,6 @@ module.exports = async (req, res) => {
       return res.status(400).send('Missing authorization code');
     }
 
-    console.log('🔐 Slack OAuth callback received, exchanging code for tokens...');
 
     // Get the redirect URI - use the actual host from the request
     const redirectUri = `https://${req.headers.host}/api/auth-slack`;
@@ -49,19 +48,16 @@ module.exports = async (req, res) => {
         // Try to parse as base64url JSON first (new format)
         const stateData = JSON.parse(Buffer.from(state, 'base64url').toString('utf-8'));
         userId = stateData.user_id;
-        console.log('📝 Extracted user_id from base64url state:', userId);
       } catch (err) {
         // If that fails, try regular base64 (in case encoding differs)
         try {
           const stateData = JSON.parse(Buffer.from(state, 'base64').toString('utf-8'));
           userId = stateData.user_id;
-          console.log('📝 Extracted user_id from base64 state:', userId);
         } catch (err2) {
           // If both fail, treat it as a plain UUID (legacy format from desktop app)
           // Validate it looks like a UUID
           if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(state)) {
             userId = state;
-            console.log('📝 Using state as plain user_id (legacy format):', userId);
           } else {
             console.error('❌ Invalid state parameter format:', state);
             return res.status(400).send(`
@@ -114,7 +110,6 @@ module.exports = async (req, res) => {
     }
 
     // Exchange code for tokens
-    console.log('🔄 Exchanging code for Slack tokens...');
     const tokenResponse = await axios.post('https://slack.com/api/oauth.v2.access', null, {
       params: {
         client_id: process.env.SLACK_CLIENT_ID,
@@ -134,12 +129,6 @@ module.exports = async (req, res) => {
       throw new Error(`Token exchange failed: ${tokenData.error}`);
     }
 
-    console.log('✅ Slack token exchange successful');
-    console.log('📦 Token response summary:');
-    console.log('   - authed_user.access_token:', tokenData.authed_user?.access_token ? `${tokenData.authed_user.access_token.substring(0, 10)}... (USER TOKEN)` : 'NOT PROVIDED');
-    console.log('   - access_token:', tokenData.access_token ? `${tokenData.access_token.substring(0, 10)}... (BOT TOKEN)` : 'NOT PROVIDED');
-    console.log('   - authed_user.scope:', tokenData.authed_user?.scope || 'NOT PROVIDED');
-    console.log('   - scope:', tokenData.scope || 'NOT PROVIDED');
 
     // Extract token information - save BOTH user and bot tokens
     // User token (xoxp-*) is needed for search:read scope
@@ -163,7 +152,6 @@ module.exports = async (req, res) => {
     }
 
     // Get user info from Slack
-    console.log('👤 Fetching Slack user info...');
     const userInfoResponse = await axios.get('https://slack.com/api/users.info', {
       params: { user: slackUserId },
       headers: { 'Authorization': `Bearer ${accessToken}` }
@@ -174,7 +162,6 @@ module.exports = async (req, res) => {
     const email = userInfo.user?.profile?.email || '';
     const avatar = userInfo.user?.profile?.image_192 || '';
 
-    console.log('✅ Slack user info retrieved:', { realName, email, teamName });
 
     // Save tokens to Supabase
     const { createClient } = require('@supabase/supabase-js');
@@ -183,7 +170,6 @@ module.exports = async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    console.log('💾 Saving Slack tokens to Supabase for user:', userId);
 
     // Get current integration settings
     const { data: currentUser } = await supabase
@@ -222,11 +208,6 @@ module.exports = async (req, res) => {
       throw updateError;
     }
 
-    console.log('✅ Slack tokens saved successfully to Supabase:');
-    console.log('   - user_access_token:', userAccessToken ? `${userAccessToken.substring(0, 10)}...` : 'NOT SET');
-    console.log('   - bot_access_token:', botAccessToken ? `${botAccessToken.substring(0, 10)}...` : 'NOT SET');
-    console.log('   - user_scopes:', userScopes.join(', ') || 'NONE');
-    console.log('   - bot_scopes:', botScopes.join(', ') || 'NONE');
 
     // Return success page
     return res.status(200).send(`

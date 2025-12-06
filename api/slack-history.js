@@ -27,7 +27,6 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log('📋 Fetching Slack history for channel:', channelId);
 
     // Initialize Supabase
     const supabase = createClient(
@@ -53,7 +52,6 @@ module.exports = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Slack not connected', messages: [] });
     }
 
-    console.log('✅ Found Slack token, fetching channel history...');
 
     // Fetch channel history from Slack API
     const response = await axios.get('https://slack.com/api/conversations.history', {
@@ -96,7 +94,6 @@ module.exports = async (req, res) => {
           userMap[userId] = u.profile?.display_name || u.real_name || u.name || userId;
         }
       } catch (e) {
-        console.log(`Failed to fetch user info for ${userId}`);
         userMap[userId] = userId;
       }
     }
@@ -112,7 +109,6 @@ module.exports = async (req, res) => {
       user_name: userMap[msg.user]
     }));
 
-    console.log(`✅ Found ${messages.length} messages with ${Object.keys(userMap).length} users resolved`);
 
     return res.json({ 
       success: true, 

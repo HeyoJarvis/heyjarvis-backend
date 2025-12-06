@@ -37,7 +37,6 @@ module.exports = async (req, res) => {
       return res.status(400).send('Missing authorization code');
     }
 
-    console.log('🔐 Microsoft OAuth callback received, exchanging code for tokens...');
 
     // Get the redirect URI - use the actual host from the request
     const redirectUri = `https://${req.headers.host}/api/auth-microsoft`;
@@ -48,7 +47,6 @@ module.exports = async (req, res) => {
       try {
         const stateData = JSON.parse(Buffer.from(req.query.state, 'base64url').toString('utf-8'));
         codeVerifier = stateData.code_verifier;
-        console.log('✅ Extracted code_verifier from state');
       } catch (err) {
         console.error('❌ Failed to parse state:', err.message);
       }
@@ -58,12 +56,6 @@ module.exports = async (req, res) => {
       throw new Error('Missing code_verifier in state parameter. PKCE is required for Microsoft OAuth.');
     }
     
-    console.log('Token exchange params:', {
-      redirectUri,
-      hasCode: !!code,
-      hasCodeVerifier: !!codeVerifier,
-      codeVerifierLength: codeVerifier?.length
-    });
 
     // Exchange code for tokens (with PKCE)
     const tokenResponse = await axios.post(
@@ -84,7 +76,6 @@ module.exports = async (req, res) => {
     );
 
     const tokens = tokenResponse.data;
-    console.log('✅ Tokens received from Microsoft');
 
     // Get user info
     const userResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
@@ -92,7 +83,6 @@ module.exports = async (req, res) => {
     });
 
     const userData = userResponse.data;
-    console.log('✅ User info retrieved:', { email: userData.mail || userData.userPrincipalName });
 
     // Extract user_id from state parameter
     let appUserId = null;
@@ -100,7 +90,6 @@ module.exports = async (req, res) => {
       try {
         const stateData = JSON.parse(Buffer.from(req.query.state, 'base64url').toString('utf-8'));
         appUserId = stateData.user_id;
-        console.log('✅ Extracted user_id from state:', appUserId);
       } catch (err) {
         console.error('❌ Could not extract user_id from state:', err.message);
       }
@@ -117,7 +106,6 @@ module.exports = async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    console.log('💾 Saving Microsoft tokens to Supabase for user:', appUserId);
 
     // Get current integration settings
     const { data: currentUser, error: fetchError } = await supabase
@@ -138,6 +126,7 @@ module.exports = async (req, res) => {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_expiry: new Date(Date.now() + (tokens.expires_in * 1000)).toISOString(),
+      scope: tokens.scope, // Save granted scopes
       email: userData.mail || userData.userPrincipalName,
       name: userData.displayName || '',
       microsoft_user_id: userData.id,
@@ -154,7 +143,6 @@ module.exports = async (req, res) => {
       throw new Error('Failed to save Microsoft tokens');
     }
 
-    console.log('✅ Microsoft tokens saved to Supabase successfully');
 
     // Show success page (no redirect needed - desktop app is polling)
     res.send(`

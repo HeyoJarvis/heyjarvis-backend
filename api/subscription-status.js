@@ -24,7 +24,6 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log('📊 Checking subscription status for user:', userId);
 
     // Initialize Supabase (secrets stay on backend!)
     const supabase = createClient(
@@ -65,12 +64,6 @@ module.exports = async (req, res) => {
       const hoursRemaining = Math.floor(msRemaining / (1000 * 60 * 60));
 
       if (now < trialEnds) {
-        console.log('✅ Active trial:', {
-          userId,
-          daysRemaining,
-          hoursRemaining,
-          trialEndsAt: user.trial_ends_at
-        });
 
         return res.json({
           success: true,
@@ -81,10 +74,6 @@ module.exports = async (req, res) => {
           trialEndsAt: user.trial_ends_at
         });
       } else {
-        console.log('⏰ Trial expired:', {
-          userId,
-          expiredAt: user.trial_ends_at
-        });
 
         return res.json({
           success: true,
@@ -101,11 +90,6 @@ module.exports = async (req, res) => {
       const subEnds = new Date(user.subscription_ends_at);
       
       if (now < subEnds) {
-        console.log('✅ Active subscription:', {
-          userId,
-          plan: user.subscription_plan,
-          expiresAt: user.subscription_ends_at
-        });
 
         return res.json({
           success: true,
@@ -114,11 +98,6 @@ module.exports = async (req, res) => {
           expiresAt: user.subscription_ends_at
         });
       } else {
-        console.log('⏰ Subscription expired:', {
-          userId,
-          plan: user.subscription_plan,
-          expiredAt: user.subscription_ends_at
-        });
 
         return res.json({
           success: true,
@@ -131,7 +110,6 @@ module.exports = async (req, res) => {
     }
 
     // No subscription
-    console.log('❌ No subscription found:', { userId });
     return res.json({
       success: true,
       hasAccess: false,

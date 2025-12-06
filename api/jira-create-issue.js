@@ -87,12 +87,6 @@ module.exports = async (req, res) => {
       payload.fields.parent = { key: issueData.epicKey };
     }
 
-    console.log('Creating JIRA issue:', {
-      projectKey,
-      summary: issueData.summary,
-      issueType: issueData.issueType,
-      payload: JSON.stringify(payload, null, 2)
-    });
 
     // Call JIRA API to create issue
     const jiraResponse = await fetch(
@@ -119,10 +113,6 @@ module.exports = async (req, res) => {
 
     const result = await jiraResponse.json();
 
-    console.log('JIRA issue created:', {
-      issueKey: result.key,
-      issueId: result.id
-    });
 
     // Set story points AFTER creation (custom field varies by JIRA instance)
     if (issueData.storyPoints !== undefined && issueData.storyPoints !== null && issueData.storyPoints !== '') {
@@ -146,11 +136,9 @@ module.exports = async (req, res) => {
             }
           );
           if (updateResponse.ok) {
-            console.log('Story points set successfully with field:', fieldId);
             break;
           }
         } catch (err) {
-          console.log('Failed to set story points with', fieldId, ':', err.message);
         }
       }
     }
@@ -177,14 +165,11 @@ module.exports = async (req, res) => {
           }
         );
         if (sprintResponse.ok) {
-          console.log('✅ Issue added to sprint via Agile API:', issueData.sprintId);
           sprintSet = true;
         } else {
           const errorText = await sprintResponse.text();
-          console.log('❌ Agile API failed:', sprintResponse.status, errorText);
         }
       } catch (sprintErr) {
-        console.log('❌ Agile API error:', sprintErr.message);
       }
       
       // If Agile API failed, try setting sprint via custom field
@@ -209,21 +194,17 @@ module.exports = async (req, res) => {
               }
             );
             if (updateResponse.ok) {
-              console.log('✅ Sprint set via custom field:', fieldId);
               sprintSet = true;
               break;
             } else {
               const errorText = await updateResponse.text();
-              console.log(`❌ Failed to set sprint with ${fieldId}:`, errorText);
             }
           } catch (err) {
-            console.log(`❌ Error setting sprint with ${fieldId}:`, err.message);
           }
         }
       }
       
       if (!sprintSet) {
-        console.log('⚠️ Warning: Could not set sprint. Issue created but not added to sprint.');
       }
     }
 

@@ -28,12 +28,6 @@ module.exports = async (req, res) => {
       });
     }
 
-    console.log('========================================');
-    console.log('🔍 SLACK SEARCH REQUEST');
-    console.log('   Query:', query);
-    console.log('   User ID:', userId);
-    console.log('   Query length:', query?.length);
-    console.log('========================================');
 
     // Initialize Supabase
     const supabase = createClient(
@@ -65,17 +59,8 @@ module.exports = async (req, res) => {
     
     // Check if we have a user token (starts with xoxp-)
     if (searchToken && !searchToken.startsWith('xoxp-')) {
-      console.log('⚠️ Warning: Search token may be a bot token. search:read requires a user token.');
-      console.log('Token type:', searchToken.substring(0, 5));
     }
 
-    console.log('✅ Found Slack tokens:');
-    console.log('   - user_access_token:', slackSettings.user_access_token ? `${slackSettings.user_access_token.substring(0, 10)}...` : 'NOT SET');
-    console.log('   - bot_access_token:', slackSettings.bot_access_token ? `${slackSettings.bot_access_token.substring(0, 10)}...` : 'NOT SET');
-    console.log('   - access_token:', slackSettings.access_token ? `${slackSettings.access_token.substring(0, 10)}...` : 'NOT SET');
-    console.log('🔑 Using token for search:', searchToken?.substring(0, 10) || 'none');
-    console.log('📋 User scopes:', slackSettings.user_scopes || 'NOT SET');
-    console.log('📋 Bot scopes:', slackSettings.bot_scopes || 'NOT SET');
 
     // Search messages using Slack API
     // Note: This requires the 'search:read' USER scope
@@ -114,15 +99,8 @@ module.exports = async (req, res) => {
     // Process search results
     const matches = response.data.messages?.matches || [];
     
-    console.log('========================================');
-    console.log('📊 SLACK SEARCH RESULTS');
-    console.log(`   Total matches: ${response.data.messages?.total || 0}`);
-    console.log(`   Returned matches: ${matches.length}`);
     if (matches.length > 0) {
-      console.log('   First match preview:', matches[0]?.text?.substring(0, 100));
-      console.log('   First match channel:', matches[0]?.channel?.name);
     }
-    console.log('========================================');
 
     // Format messages for the frontend
     const messages = matches.map(match => ({

@@ -25,7 +25,6 @@ module.exports = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing userId parameter' });
     }
 
-    console.log('📋 Fetching Slack channels for user:', userId);
 
     // Initialize Supabase
     const supabase = createClient(
@@ -51,7 +50,6 @@ module.exports = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Slack not connected', channels: [] });
     }
 
-    console.log('✅ Found Slack token, fetching channels...');
 
     // Fetch channels from Slack API
     const axios = require('axios');
@@ -86,7 +84,6 @@ module.exports = async (req, res) => {
       purpose: ch.purpose?.value
     }));
 
-    console.log(`✅ Found ${channels.length} Slack channels`);
 
     return res.json({ 
       success: true, 

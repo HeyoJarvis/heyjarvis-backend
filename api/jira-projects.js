@@ -34,7 +34,6 @@ module.exports = async (req, res) => {
     // Get valid JIRA token (refreshes if needed)
     const { access_token, cloud_id } = await ensureValidJiraToken(userId);
 
-    console.log('Fetching JIRA projects');
 
     // Get all projects
     const projectsResponse = await fetch(
@@ -66,7 +65,6 @@ module.exports = async (req, res) => {
       style: p.style
     }));
 
-    console.log('JIRA projects fetched:', projects.length);
 
     return res.status(200).json({
       success: true,

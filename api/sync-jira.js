@@ -57,7 +57,6 @@ module.exports = async (req, res) => {
     // Check if token is expired and refresh if needed
     const tokenExpiry = jiraSettings.token_expiry ? new Date(jiraSettings.token_expiry) : null;
     if (tokenExpiry && tokenExpiry < new Date() && refreshToken) {
-      console.log('JIRA token expired, refreshing...');
       try {
         const refreshResponse = await axios.post('https://auth.atlassian.com/oauth/token', {
           grant_type: 'refresh_token',
@@ -75,13 +74,15 @@ module.exports = async (req, res) => {
           integrationSettings.jira.refresh_token = refreshResponse.data.refresh_token;
         }
         integrationSettings.jira.token_expiry = new Date(Date.now() + (refreshResponse.data.expires_in * 1000)).toISOString();
+        if (refreshResponse.data.scope) {
+          integrationSettings.jira.scope = refreshResponse.data.scope; // Preserve scopes on refresh
+        }
 
         await supabase
           .from('users')
           .update({ integration_settings: integrationSettings })
           .eq('id', userId);
 
-        console.log('JIRA token refreshed successfully');
       } catch (refreshError) {
         console.error('Failed to refresh JIRA token:', refreshError.response?.data || refreshError.message);
         return res.status(401).json({ error: 'Failed to refresh JIRA token. Please reconnect JIRA.' });
@@ -101,9 +102,6 @@ module.exports = async (req, res) => {
       'customfield_10016', 'customfield_10026'
     ];
     
-    console.log('Fetching JIRA issues using GET /search/jql...');
-    console.log('Cloud ID:', cloudId);
-    
     // Build query params like desktop does
     const params = new URLSearchParams();
     params.append('jql', jql);
@@ -121,16 +119,6 @@ module.exports = async (req, res) => {
     );
 
     const issues = issuesResponse.data.issues || [];
-    console.log(`Fetched ${issues.length} issues from JIRA`);
-    
-    // Log first issue to see available fields (for debugging)
-    if (issues.length > 0) {
-      const sampleFields = issues[0].fields;
-      console.log('Sample issue fields available:', Object.keys(sampleFields));
-      console.log('Sprint field:', sampleFields.sprint);
-      console.log('customfield_10020:', sampleFields.customfield_10020);
-      console.log('customfield_10021:', sampleFields.customfield_10021);
-    }
 
     // ============================================
     // BATCH FETCH: Get all existing tasks for this JIRA workspace
@@ -151,7 +139,6 @@ module.exports = async (req, res) => {
     const existingTaskMap = new Map(
       (existingTasks || []).map(task => [task.external_key, task])
     );
-    console.log(`Found ${existingTaskMap.size} existing tasks in workspace ${cloudId}`);
 
     // Process and store each issue
     let created = 0;
@@ -173,7 +160,6 @@ module.exports = async (req, res) => {
             name: fields.sprint.name,
             state: fields.sprint.state
           };
-          console.log(`Issue ${issue.key}: Found sprint in fields.sprint: ${sprintData.name}`);
         }
         
         // Try customfield_10020 (most common for Scrum boards)
@@ -233,7 +219,6 @@ module.exports = async (req, res) => {
         
         // Extract just the sprint NAME (string) like desktop does
         const sprintName = sprintData?.name || null;
-        console.log(`Issue ${issue.key}: sprint=${sprintName || 'none'}`);  // Debug log
 
         // Extract description as text
         let description = '';
@@ -268,12 +253,19 @@ module.exports = async (req, res) => {
             jira_project_key: fields.project?.key,
             epic_key: epicKey,
             epic_name: epicName,
+            assignee: fields.assignee?.displayName, // ✅ Top-level assignee for easy access
+            assignee_account_id: fields.assignee?.accountId, // ✅ Account ID for API calls
+            sprint: sprintName, // ✅ Top-level sprint for easy access
             workflow_metadata: {
               status: fields.status?.name,
+              jira_status: fields.status?.name, // ✅ Also save as jira_status for consistency
               status_category: fields.status?.statusCategory?.key,
+              jira_status_category: fields.status?.statusCategory?.key, // ✅ Also save as jira_status_category
               priority: fields.priority?.name,
               type: fields.issuetype?.name,
+              issue_type: fields.issuetype?.name, // ✅ Also save as issue_type
               assignee: fields.assignee?.displayName,
+              assignee_account_id: fields.assignee?.accountId,
               due_date: fields.duedate,
               labels: fields.labels || [],
               description: description,
@@ -314,12 +306,19 @@ module.exports = async (req, res) => {
             jira_cloud_id: cloudId,
             epic_key: epicKey,
             epic_name: epicName,
+            assignee: fields.assignee?.displayName, // ✅ Top-level assignee for easy access
+            assignee_account_id: fields.assignee?.accountId, // ✅ Account ID for API calls
+            sprint: sprintName, // ✅ Top-level sprint for easy access
             workflow_metadata: {
               status: fields.status?.name,
+              jira_status: fields.status?.name, // ✅ Also save as jira_status for consistency
               status_category: fields.status?.statusCategory?.key,
+              jira_status_category: fields.status?.statusCategory?.key, // ✅ Also save as jira_status_category
               priority: fields.priority?.name,
               type: fields.issuetype?.name,
+              issue_type: fields.issuetype?.name, // ✅ Also save as issue_type
               assignee: fields.assignee?.displayName,
+              assignee_account_id: fields.assignee?.accountId,
               due_date: fields.duedate,
               labels: fields.labels || [],
               description: description,
@@ -349,8 +348,6 @@ module.exports = async (req, res) => {
         errors++;
       }
     }
-
-    console.log(`Sync complete: ${created} created, ${updated} updated, ${errors} errors, ${sprintsFound} with sprint data`);
 
     return res.status(200).json({
       success: true,

@@ -37,25 +37,12 @@ module.exports = async (req, res) => {
       return res.status(400).send('Missing authorization code');
     }
 
-    console.log('🔐 Google OAuth callback received, exchanging code for tokens...');
     
     // Debug: Log environment variables (without secrets)
-    console.log('Environment check:', {
-      hasClientId: !!process.env.GOOGLE_CLIENT_ID,
-      clientIdPrefix: process.env.GOOGLE_CLIENT_ID?.substring(0, 20),
-      hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
-      vercelUrl: process.env.VERCEL_URL,
-      host: req.headers.host
-    });
 
     // Get the redirect URI - use the actual host from the request
     const redirectUri = `https://${req.headers.host}/api/auth-google`;
     
-    console.log('Token exchange params:', {
-      redirectUri,
-      hasCode: !!code,
-      codeLength: code?.length
-    });
 
     // Exchange code for tokens
     const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
@@ -67,7 +54,6 @@ module.exports = async (req, res) => {
     });
 
     const tokens = tokenResponse.data;
-    console.log('✅ Tokens received from Google');
 
     // Get user info
     const userResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
@@ -75,7 +61,6 @@ module.exports = async (req, res) => {
     });
 
     const userData = userResponse.data;
-    console.log('✅ User info retrieved:', { email: userData.email });
 
     // Extract user_id from state parameter
     let appUserId = null;
@@ -83,7 +68,6 @@ module.exports = async (req, res) => {
       try {
         const stateData = JSON.parse(Buffer.from(req.query.state, 'base64url').toString('utf-8'));
         appUserId = stateData.user_id;
-        console.log('✅ Extracted user_id from state:', appUserId);
       } catch (err) {
         console.error('❌ Could not extract user_id from state:', err.message);
       }
@@ -100,7 +84,6 @@ module.exports = async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    console.log('💾 Saving Google tokens to Supabase for user:', appUserId);
 
     // Get current integration settings
     const { data: currentUser, error: fetchError } = await supabase
@@ -121,6 +104,7 @@ module.exports = async (req, res) => {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token || null,
       token_expiry: new Date(Date.now() + (tokens.expires_in * 1000)).toISOString(),
+      scope: tokens.scope, // Save granted scopes
       email: userData.email,
       name: userData.name || '',
       picture: userData.picture || '',
@@ -138,7 +122,6 @@ module.exports = async (req, res) => {
       throw new Error('Failed to save Google tokens');
     }
 
-    console.log('✅ Google tokens saved to Supabase successfully');
 
     // Show success page (no redirect needed - desktop app is polling)
     res.send(`

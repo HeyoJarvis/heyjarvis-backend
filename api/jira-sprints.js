@@ -58,7 +58,6 @@ module.exports = async (req, res) => {
     // Check if token is expired and refresh if needed
     const tokenExpiry = jiraSettings.token_expiry ? new Date(jiraSettings.token_expiry) : null;
     if (tokenExpiry && tokenExpiry < new Date() && refreshToken) {
-      console.log('JIRA token expired, refreshing...');
       try {
         const refreshResponse = await axios.post('https://auth.atlassian.com/oauth/token', {
           grant_type: 'refresh_token',
@@ -81,7 +80,6 @@ module.exports = async (req, res) => {
           .update({ integration_settings: integrationSettings })
           .eq('id', userId);
 
-        console.log('JIRA token refreshed successfully');
       } catch (refreshError) {
         console.error('Failed to refresh JIRA token:', refreshError.response?.data || refreshError.message);
         return res.status(200).json({ success: false, sprints: [], error: 'Token refresh failed' });
@@ -91,7 +89,6 @@ module.exports = async (req, res) => {
     // If boardId is provided, try the agile API first
     if (boardId) {
       try {
-        console.log('Fetching sprints for board:', boardId);
         const response = await axios.get(
           `https://api.atlassian.com/ex/jira/${cloudId}/rest/agile/1.0/board/${boardId}/sprint?state=${state}`,
           {
@@ -110,10 +107,8 @@ module.exports = async (req, res) => {
           endDate: s.endDate
         }));
 
-        console.log(`Found ${sprints.length} sprints for board ${boardId}`);
         return res.status(200).json({ success: true, sprints });
       } catch (boardError) {
-        console.log('Board sprint API failed, will try extracting from issues:', boardError.response?.status);
         // Fall through to extract from issues
       }
     }
@@ -121,27 +116,48 @@ module.exports = async (req, res) => {
     // Extract sprints from issues (same approach as sync-jira.js)
     // This works even when agile board API is not available
     const targetProject = projectKey || 'all';
-    const jql = targetProject !== 'all' 
-      ? `project = ${targetProject} AND sprint IS NOT EMPTY ORDER BY updated DESC`
-      : 'sprint IS NOT EMPTY ORDER BY updated DESC';
     
-    const params = new URLSearchParams({
-      jql,
-      maxResults: '100',
-      fields: 'sprint,customfield_10020,customfield_10010,customfield_10011'
-    });
+    // Try different JQL queries - some JIRA instances don't support "sprint IS NOT EMPTY"
+    const jqlQueries = targetProject !== 'all' 
+      ? [
+          `project = ${targetProject} ORDER BY updated DESC`,  // Simpler query first
+          `project = ${targetProject} AND sprint IS NOT EMPTY ORDER BY updated DESC`
+        ]
+      : [
+          'ORDER BY updated DESC',
+          'sprint IS NOT EMPTY ORDER BY updated DESC'
+        ];
+    
+    let response;
+    let lastError;
+    
+    for (const jql of jqlQueries) {
+      try {
+        const params = new URLSearchParams({
+          jql,
+          maxResults: '100',
+          fields: 'sprint,customfield_10020,customfield_10010,customfield_10011'
+        });
 
-    console.log('Fetching sprints from issues for project:', targetProject);
-
-    const response = await axios.get(
-      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?${params.toString()}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json'
-        }
+        response = await axios.get(
+          `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?${params.toString()}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Accept': 'application/json'
+            }
+          }
+        );
+        break; // Success, exit loop
+      } catch (err) {
+        lastError = err;
+        continue; // Try next query
       }
-    );
+    }
+    
+    if (!response) {
+      throw lastError || new Error('All JQL queries failed');
+    }
 
     const issues = response.data.issues || [];
     const sprintMap = new Map();
@@ -194,7 +210,6 @@ module.exports = async (req, res) => {
       return (order[a.state] || 3) - (order[b.state] || 3);
     });
 
-    console.log(`Found ${sprints.length} unique sprints from ${issues.length} issues`);
     return res.status(200).json({ success: true, sprints });
 
   } catch (error) {
