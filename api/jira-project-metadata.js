@@ -1,18 +1,16 @@
 /**
  * JIRA Project Metadata API Endpoint
- * Gets project creation metadata (issue types, priorities, etc.)
+ * Gets project creation metadata (issue types, priorities, components, versions)
+ * Uses same approach as sync-jira.js
  */
 
 const { createClient } = require('@supabase/supabase-js');
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const axios = require('axios');
 
 module.exports = async (req, res) => {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
   if (req.method === 'OPTIONS') {
@@ -28,107 +26,189 @@ module.exports = async (req, res) => {
     const { userId, projectKey } = req.query;
 
     if (!userId || !projectKey) {
-      return res.status(400).json({ 
+      return res.status(200).json({ 
         success: false, 
-        error: 'Missing required parameters: userId, projectKey' 
+        metadata: { issueTypes: [], priorities: [], components: [], versions: [] },
+        error: 'Missing userId or projectKey' 
       });
     }
 
-    // Initialize Supabase client
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
 
-    // Get user's JIRA settings
+    // Get user's JIRA settings (same as sync-jira.js)
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('integration_settings')
       .eq('id', userId)
       .single();
 
-    if (userError || !userData) {
-      console.error('Failed to fetch user:', userError);
-      return res.status(404).json({ success: false, error: 'User not found' });
+    if (userError || !userData?.integration_settings?.jira) {
+      return res.status(200).json({ 
+        success: false, 
+        metadata: { issueTypes: [], priorities: [], components: [], versions: [] },
+        error: 'JIRA not connected' 
+      });
     }
 
-    const jiraSettings = userData.integration_settings?.jira;
-    if (!jiraSettings || !jiraSettings.access_token) {
-      return res.status(401).json({ success: false, error: 'JIRA not connected' });
+    const jiraSettings = userData.integration_settings.jira;
+    let accessToken = jiraSettings.access_token;
+    const refreshToken = jiraSettings.refresh_token;
+    const cloudId = jiraSettings.cloud_id;
+
+    if (!cloudId || !accessToken) {
+      return res.status(200).json({ 
+        success: false, 
+        metadata: { issueTypes: [], priorities: [], components: [], versions: [] },
+        error: 'JIRA credentials incomplete' 
+      });
     }
 
-    const { access_token, cloud_id } = jiraSettings;
+    // Check if token is expired and refresh if needed (same as sync-jira.js)
+    const tokenExpiry = jiraSettings.token_expiry ? new Date(jiraSettings.token_expiry) : null;
+    if (tokenExpiry && tokenExpiry < new Date() && refreshToken) {
+      console.log('JIRA token expired, refreshing...');
+      try {
+        const refreshResponse = await axios.post('https://auth.atlassian.com/oauth/token', {
+          grant_type: 'refresh_token',
+          client_id: process.env.JIRA_CLIENT_ID,
+          client_secret: process.env.JIRA_CLIENT_SECRET,
+          refresh_token: refreshToken
+        });
 
-    console.log('Fetching JIRA project metadata:', { projectKey });
+        accessToken = refreshResponse.data.access_token;
 
-    // Get project creation metadata
-    const metadataResponse = await fetch(
-      `https://api.atlassian.com/ex/jira/${cloud_id}/rest/api/3/issue/createmeta?projectKeys=${projectKey}&expand=projects.issuetypes.fields`,
-      {
-        headers: {
-          'Authorization': `Bearer ${access_token}`,
-          'Accept': 'application/json'
+        // Update tokens in database
+        const integrationSettings = userData.integration_settings;
+        integrationSettings.jira.access_token = accessToken;
+        if (refreshResponse.data.refresh_token) {
+          integrationSettings.jira.refresh_token = refreshResponse.data.refresh_token;
         }
+        integrationSettings.jira.token_expiry = new Date(Date.now() + (refreshResponse.data.expires_in * 1000)).toISOString();
+
+        await supabase
+          .from('users')
+          .update({ integration_settings: integrationSettings })
+          .eq('id', userId);
+
+        console.log('JIRA token refreshed successfully');
+      } catch (refreshError) {
+        console.error('Failed to refresh JIRA token:', refreshError.response?.data || refreshError.message);
+        return res.status(200).json({ 
+          success: false, 
+          metadata: { issueTypes: [], priorities: [], components: [], versions: [] },
+          error: 'Token refresh failed. Please reconnect JIRA.' 
+        });
       }
-    );
-
-    if (!metadataResponse.ok) {
-      const errorText = await metadataResponse.text();
-      console.error('JIRA API error:', errorText);
-      return res.status(metadataResponse.status).json({
-        success: false,
-        error: `JIRA API error: ${errorText}`
-      });
     }
 
-    const metadata = await metadataResponse.json();
+    console.log('Fetching project metadata for:', projectKey);
 
-    if (!metadata.projects || metadata.projects.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Project not found or no permissions'
-      });
+    // Fetch project details, priorities, and issue types in parallel
+    const [projectResponse, prioritiesResponse, issueTypesResponse] = await Promise.all([
+      // Get project details (includes components and versions)
+      axios.get(
+        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/project/${projectKey}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+          }
+        }
+      ).catch(e => ({ data: null, error: e })),
+      
+      // Get all priorities
+      axios.get(
+        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/priority`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+          }
+        }
+      ).catch(e => ({ data: [], error: e })),
+      
+      // Get all issue types
+      axios.get(
+        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issuetype`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+          }
+        }
+      ).catch(e => ({ data: [], error: e }))
+    ]);
+
+    // Parse project data
+    let project = { key: projectKey, name: projectKey, id: '' };
+    let components = [];
+    let versions = [];
+    
+    if (projectResponse.data) {
+      const projectData = projectResponse.data;
+      project = {
+        key: projectData.key,
+        name: projectData.name,
+        id: projectData.id
+      };
+      components = (projectData.components || []).map(c => ({
+        id: c.id,
+        name: c.name
+      }));
+      versions = (projectData.versions || []).map(v => ({
+        id: v.id,
+        name: v.name,
+        released: v.released
+      }));
     }
 
-    const project = metadata.projects[0];
-    const issueTypes = project.issuetypes || [];
-
-    // Extract priorities from the first issue type (they're usually the same across types)
+    // Parse priorities
     let priorities = [];
-    if (issueTypes.length > 0 && issueTypes[0].fields?.priority?.allowedValues) {
-      priorities = issueTypes[0].fields.priority.allowedValues.map(p => ({
+    if (prioritiesResponse.data && Array.isArray(prioritiesResponse.data)) {
+      priorities = prioritiesResponse.data.map(p => ({
         id: p.id,
         name: p.name
       }));
     }
 
-    // Extract issue types
-    const formattedIssueTypes = issueTypes.map(it => ({
-      id: it.id,
-      name: it.name,
-      subtask: it.subtask || false
-    }));
+    // Parse issue types
+    let issueTypes = [];
+    if (issueTypesResponse.data && Array.isArray(issueTypesResponse.data)) {
+      issueTypes = issueTypesResponse.data.map(it => ({
+        id: it.id,
+        name: it.name,
+        subtask: it.subtask || false
+      }));
+    }
 
     console.log('Project metadata fetched:', {
       projectKey,
-      issueTypesCount: formattedIssueTypes.length,
-      prioritiesCount: priorities.length
+      issueTypesCount: issueTypes.length,
+      prioritiesCount: priorities.length,
+      componentsCount: components.length,
+      versionsCount: versions.length
     });
 
     return res.status(200).json({
       success: true,
-      issueTypes: formattedIssueTypes,
-      priorities: priorities,
-      project: {
-        key: project.key,
-        name: project.name,
-        id: project.id
+      metadata: {
+        issueTypes,
+        priorities,
+        components,
+        versions,
+        project
       }
     });
 
   } catch (error) {
-    console.error('Get project metadata error:', error);
-    return res.status(500).json({
+    console.error('Get project metadata error:', error.response?.data || error.message);
+    return res.status(200).json({
       success: false,
-      error: error.message
+      metadata: { issueTypes: [], priorities: [], components: [], versions: [] },
+      error: error.response?.data?.message || error.message
     });
   }
 };
-

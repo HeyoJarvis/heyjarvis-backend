@@ -132,8 +132,30 @@ module.exports = async (req, res) => {
       console.log('customfield_10021:', sampleFields.customfield_10021);
     }
 
+    // ============================================
+    // BATCH FETCH: Get all existing tasks for this JIRA workspace
+    // Tasks are workspace-scoped (by jira_cloud_id), not user-scoped
+    // ============================================
+    const { data: existingTasks, error: fetchError } = await supabase
+      .from('conversation_sessions')
+      .select('id, external_key, user_id')
+      .eq('jira_cloud_id', cloudId)
+      .eq('external_source', 'jira')
+      .eq('workflow_type', 'task');
+    
+    if (fetchError) {
+      console.error('Failed to fetch existing tasks:', fetchError);
+    }
+    
+    // Build a map of external_key -> existing task for fast lookup
+    const existingTaskMap = new Map(
+      (existingTasks || []).map(task => [task.external_key, task])
+    );
+    console.log(`Found ${existingTaskMap.size} existing tasks in workspace ${cloudId}`);
+
     // Process and store each issue
-    let synced = 0;
+    let created = 0;
+    let updated = 0;
     let errors = 0;
     let sprintsFound = 0;
 
@@ -232,50 +254,95 @@ module.exports = async (req, res) => {
           epicName = fields.parent.fields?.summary;
         }
 
-        const taskData = {
-          user_id: userId,
-          session_title: fields.summary,
-          external_key: issue.key,
-          external_source: 'jira',
-          external_url: `https://${jiraSettings.cloud_name || 'atlassian'}.atlassian.net/browse/${issue.key}`,
-          workflow_type: 'task',
-          is_completed: fields.status?.statusCategory?.key === 'done',
-          jira_project_key: fields.project?.key,
-          jira_cloud_id: cloudId,
-          epic_key: epicKey,
-          epic_name: epicName,
-          workflow_metadata: {
-            status: fields.status?.name,
-            status_category: fields.status?.statusCategory?.key,
-            priority: fields.priority?.name,
-            type: fields.issuetype?.name,
-            assignee: fields.assignee?.displayName,
-            due_date: fields.duedate,
-            labels: fields.labels || [],
-            description: description,
-            sprint: sprintName,  // For compatibility with web
-            sprint_name: sprintName,  // For compatibility with desktop
-            project_key: fields.project?.key,
-            project_name: fields.project?.name,
-            updated_at: fields.updated,
-            created_at: fields.created
-          },
-          updated_at: new Date().toISOString()
-        };
+        // Check if task already exists in this workspace
+        const existingTask = existingTaskMap.get(issue.key);
+        
+        if (existingTask) {
+          // ============================================
+          // UPDATE existing task (keep original user_id)
+          // ============================================
+          const updateData = {
+            session_title: fields.summary,
+            external_url: `https://${jiraSettings.cloud_name || 'atlassian'}.atlassian.net/browse/${issue.key}`,
+            is_completed: fields.status?.statusCategory?.key === 'done',
+            jira_project_key: fields.project?.key,
+            epic_key: epicKey,
+            epic_name: epicName,
+            workflow_metadata: {
+              status: fields.status?.name,
+              status_category: fields.status?.statusCategory?.key,
+              priority: fields.priority?.name,
+              type: fields.issuetype?.name,
+              assignee: fields.assignee?.displayName,
+              due_date: fields.duedate,
+              labels: fields.labels || [],
+              description: description,
+              sprint: sprintName,
+              sprint_name: sprintName,
+              project_key: fields.project?.key,
+              project_name: fields.project?.name,
+              updated_at: fields.updated,
+              created_at: fields.created
+            },
+            updated_at: new Date().toISOString()
+          };
 
-        // Upsert the task
-        const { error: upsertError } = await supabase
-          .from('conversation_sessions')
-          .upsert(taskData, { 
-            onConflict: 'user_id,external_key',
-            ignoreDuplicates: false
-          });
+          const { error: updateError } = await supabase
+            .from('conversation_sessions')
+            .update(updateData)
+            .eq('id', existingTask.id);
 
-        if (upsertError) {
-          console.error(`Failed to upsert ${issue.key}:`, upsertError);
-          errors++;
+          if (updateError) {
+            console.error(`Failed to update ${issue.key}:`, updateError);
+            errors++;
+          } else {
+            updated++;
+          }
         } else {
-          synced++;
+          // ============================================
+          // INSERT new task (with current user as creator)
+          // ============================================
+          const insertData = {
+            user_id: userId,
+            session_title: fields.summary,
+            external_key: issue.key,
+            external_source: 'jira',
+            external_url: `https://${jiraSettings.cloud_name || 'atlassian'}.atlassian.net/browse/${issue.key}`,
+            workflow_type: 'task',
+            is_completed: fields.status?.statusCategory?.key === 'done',
+            jira_project_key: fields.project?.key,
+            jira_cloud_id: cloudId,
+            epic_key: epicKey,
+            epic_name: epicName,
+            workflow_metadata: {
+              status: fields.status?.name,
+              status_category: fields.status?.statusCategory?.key,
+              priority: fields.priority?.name,
+              type: fields.issuetype?.name,
+              assignee: fields.assignee?.displayName,
+              due_date: fields.duedate,
+              labels: fields.labels || [],
+              description: description,
+              sprint: sprintName,
+              sprint_name: sprintName,
+              project_key: fields.project?.key,
+              project_name: fields.project?.name,
+              updated_at: fields.updated,
+              created_at: fields.created
+            },
+            updated_at: new Date().toISOString()
+          };
+
+          const { error: insertError } = await supabase
+            .from('conversation_sessions')
+            .insert(insertData);
+
+          if (insertError) {
+            console.error(`Failed to insert ${issue.key}:`, insertError);
+            errors++;
+          } else {
+            created++;
+          }
         }
       } catch (issueError) {
         console.error(`Error processing ${issue.key}:`, issueError.message);
@@ -283,11 +350,13 @@ module.exports = async (req, res) => {
       }
     }
 
-    console.log(`Sync complete: ${synced} synced, ${errors} errors, ${sprintsFound} with sprint data`);
+    console.log(`Sync complete: ${created} created, ${updated} updated, ${errors} errors, ${sprintsFound} with sprint data`);
 
     return res.status(200).json({
       success: true,
-      synced,
+      created,
+      updated,
+      synced: created + updated,
       errors,
       total: issues.length,
       sprintsFound

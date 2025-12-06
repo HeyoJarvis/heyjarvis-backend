@@ -3,10 +3,7 @@
  * Creates a new JIRA issue via the JIRA REST API
  */
 
-const { createClient } = require('@supabase/supabase-js');
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const { ensureValidJiraToken } = require('../lib/jira-token-refresh');
 
 module.exports = async (req, res) => {
   // Enable CORS
@@ -34,27 +31,8 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Initialize Supabase client
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Get user's JIRA settings
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('integration_settings')
-      .eq('id', userId)
-      .single();
-
-    if (userError || !userData) {
-      console.error('Failed to fetch user:', userError);
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    const jiraSettings = userData.integration_settings?.jira;
-    if (!jiraSettings || !jiraSettings.access_token) {
-      return res.status(401).json({ success: false, error: 'JIRA not connected' });
-    }
-
-    const { access_token, cloud_id, cloud_name } = jiraSettings;
+    // Get valid JIRA token (refreshes if needed)
+    const { access_token, cloud_id, cloud_name } = await ensureValidJiraToken(userId);
 
     // Build JIRA API payload
     const payload = {
@@ -109,22 +87,11 @@ module.exports = async (req, res) => {
       payload.fields.parent = { key: issueData.epicKey };
     }
 
-    // Add sprint (if provided)
-    if (issueData.sprintId) {
-      // Sprint is added via a custom field, typically customfield_10020
-      payload.fields.customfield_10020 = issueData.sprintId;
-    }
-
-    // Add story points (if provided)
-    if (issueData.storyPoints) {
-      // Story points custom field, typically customfield_10016
-      payload.fields.customfield_10016 = issueData.storyPoints;
-    }
-
     console.log('Creating JIRA issue:', {
       projectKey,
       summary: issueData.summary,
-      issueType: issueData.issueType
+      issueType: issueData.issueType,
+      payload: JSON.stringify(payload, null, 2)
     });
 
     // Call JIRA API to create issue
@@ -157,11 +124,114 @@ module.exports = async (req, res) => {
       issueId: result.id
     });
 
+    // Set story points AFTER creation (custom field varies by JIRA instance)
+    if (issueData.storyPoints !== undefined && issueData.storyPoints !== null && issueData.storyPoints !== '') {
+      const storyPointFieldIds = ['customfield_10016', 'customfield_10020', 'customfield_10026'];
+      for (const fieldId of storyPointFieldIds) {
+        try {
+          const updateResponse = await fetch(
+            `https://api.atlassian.com/ex/jira/${cloud_id}/rest/api/3/issue/${result.key}`,
+            {
+              method: 'PUT',
+              headers: {
+                'Authorization': `Bearer ${access_token}`,
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                fields: {
+                  [fieldId]: parseFloat(issueData.storyPoints)
+                }
+              })
+            }
+          );
+          if (updateResponse.ok) {
+            console.log('Story points set successfully with field:', fieldId);
+            break;
+          }
+        } catch (err) {
+          console.log('Failed to set story points with', fieldId, ':', err.message);
+        }
+      }
+    }
+
+    // Add to sprint AFTER creation
+    // Try both Agile API and custom field approach
+    if (issueData.sprintId) {
+      let sprintSet = false;
+      
+      // Try Agile API first
+      try {
+        const sprintResponse = await fetch(
+          `https://api.atlassian.com/ex/jira/${cloud_id}/rest/agile/1.0/sprint/${issueData.sprintId}/issue`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${access_token}`,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              issues: [result.key]
+            })
+          }
+        );
+        if (sprintResponse.ok) {
+          console.log('✅ Issue added to sprint via Agile API:', issueData.sprintId);
+          sprintSet = true;
+        } else {
+          const errorText = await sprintResponse.text();
+          console.log('❌ Agile API failed:', sprintResponse.status, errorText);
+        }
+      } catch (sprintErr) {
+        console.log('❌ Agile API error:', sprintErr.message);
+      }
+      
+      // If Agile API failed, try setting sprint via custom field
+      if (!sprintSet) {
+        const sprintFieldIds = ['customfield_10020', 'customfield_10010', 'customfield_10011'];
+        for (const fieldId of sprintFieldIds) {
+          try {
+            const updateResponse = await fetch(
+              `https://api.atlassian.com/ex/jira/${cloud_id}/rest/api/3/issue/${result.key}`,
+              {
+                method: 'PUT',
+                headers: {
+                  'Authorization': `Bearer ${access_token}`,
+                  'Accept': 'application/json',
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  fields: {
+                    [fieldId]: parseInt(issueData.sprintId)
+                  }
+                })
+              }
+            );
+            if (updateResponse.ok) {
+              console.log('✅ Sprint set via custom field:', fieldId);
+              sprintSet = true;
+              break;
+            } else {
+              const errorText = await updateResponse.text();
+              console.log(`❌ Failed to set sprint with ${fieldId}:`, errorText);
+            }
+          } catch (err) {
+            console.log(`❌ Error setting sprint with ${fieldId}:`, err.message);
+          }
+        }
+      }
+      
+      if (!sprintSet) {
+        console.log('⚠️ Warning: Could not set sprint. Issue created but not added to sprint.');
+      }
+    }
+
     return res.status(200).json({
       success: true,
       issueKey: result.key,
       issueId: result.id,
-      url: `https://${cloud_name}.atlassian.net/browse/${result.key}`
+      url: `https://${cloud_name || 'atlassian'}.atlassian.net/browse/${result.key}`
     });
 
   } catch (error) {
@@ -172,4 +242,3 @@ module.exports = async (req, res) => {
     });
   }
 };
-

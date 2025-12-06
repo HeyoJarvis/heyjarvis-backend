@@ -3,10 +3,7 @@
  * Gets all accessible JIRA projects
  */
 
-const { createClient } = require('@supabase/supabase-js');
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const { ensureValidJiraToken } = require('../lib/jira-token-refresh');
 
 module.exports = async (req, res) => {
   // Enable CORS
@@ -34,27 +31,8 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Initialize Supabase client
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Get user's JIRA settings
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('integration_settings')
-      .eq('id', userId)
-      .single();
-
-    if (userError || !userData) {
-      console.error('Failed to fetch user:', userError);
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    const jiraSettings = userData.integration_settings?.jira;
-    if (!jiraSettings || !jiraSettings.access_token) {
-      return res.status(401).json({ success: false, error: 'JIRA not connected' });
-    }
-
-    const { access_token, cloud_id } = jiraSettings;
+    // Get valid JIRA token (refreshes if needed)
+    const { access_token, cloud_id } = await ensureValidJiraToken(userId);
 
     console.log('Fetching JIRA projects');
 
@@ -103,4 +81,3 @@ module.exports = async (req, res) => {
     });
   }
 };
-
