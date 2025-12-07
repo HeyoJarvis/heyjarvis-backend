@@ -103,7 +103,10 @@ module.exports = async (req, res) => {
     });
 
     console.log('✅ Checkout session created:', session.id);
-    return res.status(200).json({ sessionId: session.id });
+    return res.status(200).json({ 
+      sessionId: session.id,
+      url: session.url // Return the checkout URL for direct redirect
+    });
   } catch (error) {
     console.error('❌ Checkout session error:', error);
     return res.status(500).json({ error: error.message });
