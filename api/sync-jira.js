@@ -123,21 +123,29 @@ module.exports = async (req, res) => {
     // ============================================
     // BATCH FETCH: Get all existing tasks for this JIRA workspace
     // Tasks are workspace-scoped (by jira_cloud_id), not user-scoped
+    // Note: Query by external_key pattern OR jira_cloud_id to catch tasks
+    // that may not have external_source set properly
     // ============================================
     const { data: existingTasks, error: fetchError } = await supabase
       .from('conversation_sessions')
-      .select('id, external_key, user_id')
-      .eq('jira_cloud_id', cloudId)
-      .eq('external_source', 'jira')
-      .eq('workflow_type', 'task');
+      .select('id, external_key, user_id, external_source')
+      .eq('workflow_type', 'task')
+      .or(`jira_cloud_id.eq.${cloudId},external_key.like.%-*`);
     
     if (fetchError) {
       console.error('Failed to fetch existing tasks:', fetchError);
     }
     
+    // Filter to only include tasks that look like JIRA tasks (have external_key like XXX-123)
+    const jiraTasks = (existingTasks || []).filter(t => 
+      t.external_key && /^[A-Z]+-\d+$/.test(t.external_key)
+    );
+    
+    console.log(`Found ${jiraTasks.length} existing JIRA tasks in database`);
+    
     // Build a map of external_key -> existing task for fast lookup
     const existingTaskMap = new Map(
-      (existingTasks || []).map(task => [task.external_key, task])
+      jiraTasks.map(task => [task.external_key, task])
     );
 
     // Process and store each issue
@@ -287,7 +295,7 @@ module.exports = async (req, res) => {
             .eq('id', existingTask.id);
 
           if (updateError) {
-            console.error(`Failed to update ${issue.key}:`, updateError);
+            console.error(`Failed to update ${issue.key}:`, updateError.message || updateError);
             errors++;
           } else {
             updated++;
@@ -340,7 +348,7 @@ module.exports = async (req, res) => {
             .insert(insertData);
 
           if (insertError) {
-            console.error(`Failed to insert ${issue.key}:`, insertError);
+            console.error(`Failed to insert ${issue.key}:`, insertError.message || insertError.code || insertError);
             errors++;
           } else {
             created++;
