@@ -100,8 +100,8 @@ module.exports = async (req, res) => {
       subscriptionEnd.setFullYear(subscriptionEnd.getFullYear() + 1);
     }
     
-    // Use 'pro' as the plan name - database enum only accepts: trial, basic, pro, enterprise
-    const planName = 'pro';
+    // Use 'professional' as the plan name - database enum accepts: trial, starter, professional, enterprise
+    const planName = 'professional';
     
     console.log('✅ Found active subscription:', subscription.id);
     console.log('📅 Raw period end:', subscription.current_period_end);

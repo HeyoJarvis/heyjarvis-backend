@@ -47,7 +47,7 @@ module.exports = async (req, res) => {
         await supabase
           .from('users')
           .update({
-            subscription_plan: 'pro', // Database enum only accepts: trial, basic, pro, enterprise
+            subscription_plan: 'professional', // Database enum accepts: trial, starter, professional, enterprise
             subscription_ends_at: subscriptionEndDate.toISOString(),
             trial_ends_at: null // Clear trial
           })
@@ -83,11 +83,11 @@ module.exports = async (req, res) => {
               })
               .eq('id', user.id);
           } else {
-            // Subscription cancelled or expired
+            // Subscription cancelled or expired - revert to trial
             await supabase
               .from('users')
               .update({
-                subscription_plan: 'free',
+                subscription_plan: 'trial',
                 subscription_ends_at: null
               })
               .eq('id', user.id);
