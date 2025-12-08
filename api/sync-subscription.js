@@ -80,12 +80,33 @@ module.exports = async (req, res) => {
     }
 
     const subscription = subscriptions.data[0];
-    const subscriptionEnd = new Date(subscription.current_period_end * 1000);
-    const billingInterval = subscription.items.data[0]?.price?.recurring?.interval;
+    
+    // Safely parse subscription end date
+    let subscriptionEnd;
+    try {
+      // Stripe returns Unix timestamp in seconds
+      const timestamp = subscription.current_period_end;
+      subscriptionEnd = new Date(timestamp * 1000);
+      
+      // Validate the date
+      if (isNaN(subscriptionEnd.getTime())) {
+        console.log('⚠️ Invalid date, using 1 year from now');
+        subscriptionEnd = new Date();
+        subscriptionEnd.setFullYear(subscriptionEnd.getFullYear() + 1);
+      }
+    } catch (e) {
+      console.log('⚠️ Date parsing error, using 1 year from now');
+      subscriptionEnd = new Date();
+      subscriptionEnd.setFullYear(subscriptionEnd.getFullYear() + 1);
+    }
+    
+    const billingInterval = subscription.items?.data?.[0]?.price?.recurring?.interval;
     const planName = billingInterval === 'year' ? 'annual' : 'monthly';
     
     console.log('✅ Found active subscription:', subscription.id);
+    console.log('📅 Raw period end:', subscription.current_period_end);
     console.log('📅 Subscription ends:', subscriptionEnd.toISOString());
+    console.log('📋 Billing interval:', billingInterval);
     console.log('📋 Plan:', planName);
 
     // Update user's subscription in database
