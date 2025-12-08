@@ -106,7 +106,6 @@ module.exports = async (req, res) => {
     console.log('✅ Found active subscription:', subscription.id);
     console.log('📅 Raw period end:', subscription.current_period_end);
     console.log('📅 Subscription ends:', subscriptionEnd.toISOString());
-    console.log('📋 Billing interval:', billingInterval);
     console.log('📋 Plan:', planName);
 
     // Update user's subscription in database
