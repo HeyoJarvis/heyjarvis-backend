@@ -100,8 +100,8 @@ module.exports = async (req, res) => {
       subscriptionEnd.setFullYear(subscriptionEnd.getFullYear() + 1);
     }
     
-    const billingInterval = subscription.items?.data?.[0]?.price?.recurring?.interval;
-    const planName = billingInterval === 'year' ? 'annual' : 'monthly';
+    // Use 'pro' as the plan name - database enum only accepts: trial, basic, pro, enterprise
+    const planName = 'pro';
     
     console.log('✅ Found active subscription:', subscription.id);
     console.log('📅 Raw period end:', subscription.current_period_end);
