@@ -47,7 +47,7 @@ module.exports = async (req, res) => {
         await supabase
           .from('users')
           .update({
-            subscription_plan: billingCycle === 'annual' ? 'annual' : 'monthly',
+            subscription_plan: 'pro', // Database enum only accepts: trial, basic, pro, enterprise
             subscription_ends_at: subscriptionEndDate.toISOString(),
             trial_ends_at: null // Clear trial
           })
