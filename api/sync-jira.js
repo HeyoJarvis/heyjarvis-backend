@@ -248,6 +248,7 @@ module.exports = async (req, res) => {
           // ============================================
           const updateData = {
             session_title: fields.summary,
+            external_source: 'jira', // ✅ Ensure external_source is always set
             external_url: `https://${jiraSettings.cloud_name || 'atlassian'}.atlassian.net/browse/${issue.key}`,
             is_completed: fields.status?.statusCategory?.key === 'done',
             jira_project_key: fields.project?.key,
@@ -257,6 +258,7 @@ module.exports = async (req, res) => {
             assignee_account_id: fields.assignee?.accountId, // ✅ Account ID for API calls
             sprint: sprintName, // ✅ Top-level sprint for easy access
             workflow_metadata: {
+              external_source: 'jira', // ✅ Also in metadata for frontend compatibility
               status: fields.status?.name,
               jira_status: fields.status?.name, // ✅ Also save as jira_status for consistency
               status_category: fields.status?.statusCategory?.key,
@@ -310,6 +312,7 @@ module.exports = async (req, res) => {
             assignee_account_id: fields.assignee?.accountId, // ✅ Account ID for API calls
             sprint: sprintName, // ✅ Top-level sprint for easy access
             workflow_metadata: {
+              external_source: 'jira', // ✅ Also in metadata for frontend compatibility
               status: fields.status?.name,
               jira_status: fields.status?.name, // ✅ Also save as jira_status for consistency
               status_category: fields.status?.statusCategory?.key,
