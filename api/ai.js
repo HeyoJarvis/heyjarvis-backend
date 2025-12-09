@@ -20,7 +20,8 @@ module.exports = async function handler(req, res) {
       messages, 
       system,
       model = 'claude-sonnet-4-20250514', 
-      max_tokens = 4096 
+      max_tokens = 4096,
+      stream = false  // New parameter to enable streaming
     } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
@@ -43,9 +44,38 @@ module.exports = async function handler(req, res) {
       requestParams.system = system;
     }
 
-    const response = await anthropic.messages.create(requestParams);
+    // STREAMING MODE - Send chunks as they arrive
+    if (stream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
 
+      const streamResponse = anthropic.messages.stream(requestParams);
+
+      streamResponse.on('text', (text) => {
+        // Send each text chunk as SSE
+        res.write(`data: ${JSON.stringify({ type: 'content_block_delta', text })}\n\n`);
+      });
+
+      streamResponse.on('message', (message) => {
+        // Send final message with full response
+        res.write(`data: ${JSON.stringify({ type: 'message_stop', message })}\n\n`);
+        res.end();
+      });
+
+      streamResponse.on('error', (error) => {
+        console.error('Stream error:', error);
+        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+        res.end();
+      });
+
+      return;
+    }
+
+    // NON-STREAMING MODE - Original behavior for backward compatibility
+    const response = await anthropic.messages.create(requestParams);
     return res.status(200).json(response);
+    
   } catch (error) {
     console.error('Anthropic API error:', error);
     return res.status(500).json({ 
