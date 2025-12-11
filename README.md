@@ -1,6 +1,6 @@
 # HeyJarvis Backend
 
-Backend API for HeyJarvis Electron app. Deployed on Vercel.
+Backend API for HeyJarvis Electron app. Deployed on Vercel..
 
 ## Endpoints
 
