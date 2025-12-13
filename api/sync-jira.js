@@ -89,10 +89,28 @@ module.exports = async (req, res) => {
       }
     }
 
+    // Determine sync window based on last sync time
+    const lastSync = jiraSettings.last_sync ? new Date(jiraSettings.last_sync) : null;
+    const now = new Date();
+    let jql;
+
+    if (!lastSync) {
+      // First sync - get ALL issues (no time filter)
+      jql = 'ORDER BY updated DESC';
+      console.log('🆕 First sync - fetching ALL issues');
+    } else {
+      // Incremental sync - get issues updated since last sync (with 1 hour buffer for safety)
+      const hoursSinceLastSync = (now - lastSync) / (1000 * 60 * 60);
+      const bufferHours = Math.ceil(hoursSinceLastSync) + 1; // Add 1 hour buffer
+      
+      // Cap at 48 hours for safety (in case of long gaps)
+      const syncWindow = Math.min(bufferHours, 48);
+      jql = `updated >= -${syncWindow}h ORDER BY updated DESC`;
+      console.log(`🔄 Incremental sync - fetching last ${syncWindow} hours (since ${lastSync.toISOString()})`);
+    }
+
     // Fetch issues from JIRA (with sprint info)
     // Using GET /rest/api/3/search/jql with query params (same as desktop app)
-    // Note: JIRA requires bounded queries - use updated filter to get recent issues
-    const jql = 'updated >= -365d ORDER BY updated DESC';  // Get issues updated in last year
     const fields = [
       'summary', 'status', 'priority', 'issuetype', 'assignee', 'duedate',
       'labels', 'description', 'sprint', 'parent', 'project', 'updated', 'created',
@@ -102,23 +120,44 @@ module.exports = async (req, res) => {
       'customfield_10016', 'customfield_10026'
     ];
     
-    // Build query params like desktop does
-    const params = new URLSearchParams();
-    params.append('jql', jql);
-    params.append('maxResults', '100');
-    fields.forEach(f => params.append('fields', f));
-    
-    const issuesResponse = await axios.get(
-      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?${params.toString()}`,
-      {
-        headers: { 
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json'
-        }
-      }
-    );
+    // Fetch ALL issues with pagination
+    let allIssues = [];
+    let startAt = 0;
+    const maxResults = 100;
+    let total = 0;
 
-    const issues = issuesResponse.data.issues || [];
+    console.log('🔄 Starting JIRA sync with pagination...');
+
+    do {
+      // Build query params for this page
+      const params = new URLSearchParams();
+      params.append('jql', jql);
+      params.append('maxResults', maxResults.toString());
+      params.append('startAt', startAt.toString());
+      fields.forEach(f => params.append('fields', f));
+      
+      const issuesResponse = await axios.get(
+        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?${params.toString()}`,
+        {
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      const responseData = issuesResponse.data;
+      const pageIssues = responseData.issues || [];
+      allIssues = allIssues.concat(pageIssues);
+      total = responseData.total;
+      startAt += maxResults;
+      
+      console.log(`📦 Fetched ${allIssues.length} of ${total} issues (page size: ${pageIssues.length})`);
+      
+    } while (startAt < total && allIssues.length < total);
+
+    const issues = allIssues;
+    console.log(`✅ Total issues fetched: ${issues.length}`);
 
     // ============================================
     // BATCH FETCH: Get all existing tasks for this JIRA workspace
@@ -358,6 +397,22 @@ module.exports = async (req, res) => {
         console.error(`Error processing ${issue.key}:`, issueError.message);
         errors++;
       }
+    }
+
+    // Update last_sync timestamp after successful sync
+    try {
+      const integrationSettings = userData.integration_settings;
+      integrationSettings.jira.last_sync = now.toISOString();
+
+      await supabase
+        .from('users')
+        .update({ integration_settings: integrationSettings })
+        .eq('id', userId);
+
+      console.log(`✅ Updated last_sync timestamp: ${now.toISOString()}`);
+    } catch (updateError) {
+      console.error('Failed to update last_sync timestamp:', updateError.message);
+      // Don't fail the sync if timestamp update fails
     }
 
     return res.status(200).json({
