@@ -95,9 +95,10 @@ module.exports = async (req, res) => {
     let jql;
 
     if (!lastSync) {
-      // First sync - get ALL issues (no time filter)
-      jql = 'ORDER BY updated DESC';
-      console.log('🆕 First sync - fetching ALL issues');
+      // First sync - get all issues from last 2 years (JIRA requires bounded queries)
+      // 2 years should capture all active projects and historical data
+      jql = 'updated >= -730d ORDER BY updated DESC';
+      console.log('🆕 First sync - fetching all issues from last 2 years');
     } else {
       // Incremental sync - get issues updated since last sync (with 1 hour buffer for safety)
       const hoursSinceLastSync = (now - lastSync) / (1000 * 60 * 60);
